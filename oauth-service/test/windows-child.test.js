@@ -46,12 +46,12 @@ const goodReport = [
 function childOptions(mode, report = goodReport) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-fake-ps-"));
   const fixture = path.join(dir, "fake-powershell.cjs");
-  fs.writeFileSync(fixture, `#!/usr/bin/env node\n${FAKE_POWERSHELL}`);
-  fs.chmodSync(fixture, 0o755);
+  fs.writeFileSync(fixture, FAKE_POWERSHELL);
   return {
     platform: "win32",
     user: "naesm",
-    command: fixture,
+    command: process.execPath,
+    argsPrefix: [fixture],
     env: { FAKE_PS_MODE: mode, FAKE_PS_REPORT: report },
   };
 }

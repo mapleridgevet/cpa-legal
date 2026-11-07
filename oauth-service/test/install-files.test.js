@@ -3,9 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { copyRelease, missingReleaseFiles } from "../src/install-files.js";
+import { fileURLToPath } from "node:url";
+import { copyRelease, missingReleaseFiles, releaseRootFromModuleUrl } from "../src/install-files.js";
 
-const releaseRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const releaseRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function writeRelease(dir, extra = {}) {
   for (const rel of [
@@ -38,6 +39,10 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.equal(copyAt > 0 && placedAt > copyAt && protectAt > placedAt, true);
   assert.equal(installer.includes("Copy-Item"), false);
   assert.equal(installer.includes("Set-Acl"), false);
+  const winUrl = "file:///C:/Users/naesm/cpa-oauth-service/test/install-files.test.js";
+  const fromPathname = path.win32.resolve(path.win32.dirname(new URL(winUrl).pathname), "..");
+  assert.equal(releaseRootFromModuleUrl(winUrl, path.win32), "C:\\Users\\naesm\\cpa-oauth-service");
+  assert.notEqual(fromPathname, "C:\\Users\\naesm\\cpa-oauth-service");
 });
 
 test("fresh install and upgrade both place protect-path.js without nesting src", () => {
@@ -47,6 +52,10 @@ test("fresh install and upgrade both place protect-path.js without nesting src",
   const data = path.join(root, "cpa-oauth");
   const connector = path.join(root, "quickbooks-card-connector");
   writeRelease(source);
+  fs.mkdirSync(path.join(program, "src", "src"), { recursive: true });
+  fs.writeFileSync(path.join(program, "src", "src", "acl.js"), "nested src");
+  fs.mkdirSync(path.join(program, "test", "test"), { recursive: true });
+  fs.writeFileSync(path.join(program, "test", "test", "acl.test.js"), "nested test");
   fs.mkdirSync(path.join(program, "src"), { recursive: true });
   fs.writeFileSync(path.join(program, "src", "acl.js"), "old acl");
   fs.mkdirSync(data, { recursive: true });
@@ -60,6 +69,7 @@ test("fresh install and upgrade both place protect-path.js without nesting src",
 
   assert.equal(fs.readFileSync(path.join(program, "src", "protect-path.js"), "utf8"), "new src/protect-path.js");
   assert.equal(fs.existsSync(path.join(program, "src", "src")), false);
+  assert.equal(fs.existsSync(path.join(program, "test", "test")), false);
   assert.equal(fs.readFileSync(path.join(program, "src", "acl.js"), "utf8"), "new src/acl.js");
   assert.equal(fs.readFileSync(path.join(data, "service-config.json"), "utf8"), "keep-config");
   assert.equal(fs.readFileSync(path.join(data, "qbo-tokens.json"), "utf8"), "keep-token");

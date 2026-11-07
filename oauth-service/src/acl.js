@@ -97,7 +97,8 @@ export function encodePowerShellCommand(script) {
 
 function runPowerShell(script, target, user, options = {}) {
   const command = options.command || "powershell.exe";
-  const args = options.args || ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script)];
+  const powershellArgs = ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script)];
+  const args = options.argsPrefix ? [...options.argsPrefix, ...powershellArgs] : (options.args || powershellArgs);
   const result = spawnSync(command, args, {
     windowsHide: true,
     env: { ...process.env, ...options.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },

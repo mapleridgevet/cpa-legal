@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const ROOT_FILES = [
   "package.json",
@@ -44,6 +44,31 @@ export function missingReleaseFiles(sourceDir) {
   return REQUIRED.filter((rel) => !fs.existsSync(path.join(sourceDir, rel)));
 }
 
+export function pathFromFileUrl(moduleUrl, pathApi = path) {
+  const pathname = decodeURIComponent(new URL(moduleUrl).pathname);
+  if (pathApi.sep === "\\") {
+    const drive = pathname.match(/^\/([A-Za-z]:\/.*)$/);
+    if (drive) return drive[1].replace(/\//g, "\\");
+  }
+  return fileURLToPath(moduleUrl);
+}
+
+export function releaseRootFromModuleUrl(moduleUrl, pathApi = path) {
+  return pathApi.resolve(pathApi.dirname(pathFromFileUrl(moduleUrl, pathApi)), "..");
+}
+
+export function removeNestedInstallerCopies(programDir) {
+  assertNotConnector(programDir);
+  const program = path.resolve(programDir);
+  for (const name of ["src", "test"]) {
+    const target = path.resolve(program, name, name);
+    if (path.relative(program, target) !== path.join(name, name)) {
+      throw new Error("Refusing to delete outside the program directory.");
+    }
+    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+  }
+}
+
 export function copyRelease(sourceDir, programDir) {
   assertNotConnector(sourceDir);
   assertNotConnector(programDir);
@@ -60,6 +85,7 @@ export function copyRelease(sourceDir, programDir) {
       copyChildren(path.join(source, name), path.join(program, name));
     }
   }
+  removeNestedInstallerCopies(program);
   const notPlaced = missingReleaseFiles(program);
   if (notPlaced.length) throw new Error(`Install copy did not place ${notPlaced.join(", ")}`);
 }
