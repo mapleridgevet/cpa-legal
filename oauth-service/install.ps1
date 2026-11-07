@@ -51,25 +51,13 @@ if ([int]$Matches[1] -lt 20) {
   throw "Node.js 20 or newer is required. The service was not started."
 }
 
-if (-not $SourceDir.Equals([System.IO.Path]::GetFullPath($ProgramDir), [StringComparison]::OrdinalIgnoreCase)) {
-  New-Item -ItemType Directory -Force -Path $ProgramDir | Out-Null
-  $names = @(
-    "package.json",
-    "package-lock.json",
-    "host-settings.json",
-    "src",
-    "test",
-    "install.ps1",
-    "start-oauth-service.ps1",
-    "README.md"
-  )
-  foreach ($name in $names) {
-    $from = Join-Path $SourceDir $name
-    if (-not (Test-Path -LiteralPath $from)) {
-      throw "Release is missing $name"
-    }
-    Copy-Item -LiteralPath $from -Destination (Join-Path $ProgramDir $name) -Recurse -Force
-  }
+& node (Join-Path $SourceDir "src\install-files.js") $SourceDir $ProgramDir
+if ($LASTEXITCODE -ne 0) {
+  throw "Install copy failed. Nothing was started."
+}
+$helper = Join-Path $ProgramDir "src\protect-path.js"
+if (-not (Test-Path -LiteralPath $helper)) {
+  throw "Install copy did not place $helper. Nothing was started."
 }
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
