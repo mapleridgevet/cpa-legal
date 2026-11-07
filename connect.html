@@ -29,6 +29,17 @@
       </div>
 
       <section>
+        <h2>Separate sign-in service</h2>
+        <p>
+          The program that can actually sign the Owner in, send the browser to Intuit, receive the authorization code,
+          and store tokens is <code>oauth-service</code> in the source repository. GitHub Pages does not run it, and
+          Intuit must not send the authorization code to <code>mapleridgevet.github.io</code>. That service is not deployed
+          and has no hostname yet. Until the Owner approves a hostname and starts it on the Company PC, this page cannot
+          hand you off to a live sign-in.
+        </p>
+      </section>
+
+      <section>
         <h2>What this address is</h2>
         <p>
           Intuit’s app settings ask for a connect/reconnect URL: the page a customer opens when connecting or reconnecting the app.

@@ -1,0 +1,4 @@
+# GitHub Pages uses Jekyll. Keep the OAuth service off the public legal site.
+exclude:
+  - oauth-service
+  - README.md
