@@ -14,7 +14,7 @@ After configuration, the process listens on `127.0.0.1` only.
 - **Revoke QuickBooks tokens** calls `POST https://developer.api.intuit.com/v2/oauth2/tokens/revoke`. HTTP 200 clears the local file. Any other result, including a thrown network error, keeps the file and says the disconnect was not successful.
 - `GET /disconnect` does not revoke anything. It is safe for Intuit to land a browser there.
 
-The service refuses to start in production unless the redirect URI is `https` on the same origin as `PUBLIC_BASE_URL`, the path is `/callback`, the host is not localhost and not a `github.io` host, cookies are `Secure`, the bind address is loopback, and `DATA_DIR` is outside this repository.
+The service refuses to start in production unless the public URL is `https://mapleridgecpa.com`, the redirect URI is exactly `https://mapleridgecpa.com/callback`, cookies are `Secure`, the bind address is `127.0.0.1`, the port is `8787`, and `DATA_DIR` is outside this program directory and outside any git checkout. On Windows, token files are locked with `icacls` to the current user. If that ACL cannot be set, the file is deleted and the write fails.
 
 ## Run the tests
 
@@ -32,14 +32,13 @@ Intuit production redirect URIs must be HTTPS and cannot be an IP address or a G
 
 Verified free front door: [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) on Cloudflare’s free plan. Cloudflare’s current docs require a Cloudflare account and a domain whose DNS Cloudflare can publish. A quick tunnel hostname on `trycloudflare.com` changes when the process restarts, so it is not a redirect URI to register with Intuit.
 
-Recommended shape, after the Owner approves it:
+The domain `mapleridgecpa.com` is active at Cloudflare, and the named tunnel `mapleridge-cpa` is installed on the Company PC. No hostname route has been added. This repository does not change Cloudflare, and it has not been installed on that PC.
 
-1. Create a free Cloudflare account. Add a domain the Company already controls, or approve buying and delegating one. A subdomain such as `qbo-auth.example.com` is enough. Do not point `mapleridgevet.github.io` at this service.
-2. On the same Windows PC as the connector, install `cloudflared` and a named tunnel to `http://127.0.0.1:8787`. Cloudflare presents the public HTTPS certificate. The Node process does not need a public inbound port.
-3. Choose `DATA_DIR` outside the git checkout, readable only by the Owner Windows account.
-4. Set `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `OWNER_PASSWORD` (16+ characters), `SESSION_SECRET` (32+ characters), `PUBLIC_BASE_URL`, and `QBO_REDIRECT_URI` to `https://THAT-HOST/callback`. Keep those in the user environment, not in git.
-5. In the Intuit developer portal, register that exact redirect URI on the Production redirect list when ready. Set Launch URL and Connect/Reconnect URL to `https://THAT-HOST/`. The legal homepage is not a sign-in page. The Disconnect URL can remain `https://mapleridgevet.github.io/cpa-legal/disconnect.html` or be `https://THAT-HOST/disconnect`. Neither address revokes tokens by being opened.
-6. Start `npm start` only when those values exist. This repository does not start it.
+When the Owner adds the route, it must be hostname `mapleridgecpa.com` to origin `http://127.0.0.1:8787`. Do not use `www`, and do not use `mapleridgevet.github.io`.
+
+`install.ps1` copies the program to `C:\Users\naesm\cpa-oauth-service` and writes non-secret settings under `C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth`. It does not write into `C:\Users\naesm\quickbooks-card-connector`. Without `-ConfigureSecrets` it runs the tests and the secret-free health check, then stops. It does not listen and does not contact Intuit. `-ConfigureSecrets` prompts with hidden input and stores the values in a DPAPI file for the current Windows user. It still does not start the listener.
+
+Do not run `start-oauth-service.ps1` until the Intuit production client id and secret exist and the tunnel route is in place. The start script refuses to run when that secret file is absent.
 
 Tradeoff: Cloudflare terminates TLS, so the authorization code in the callback URL and the token-exchange body pass through Cloudflare. A tunnel also stops when the PC or `cloudflared` stops. A paid VM with its own certificate would avoid Cloudflare seeing the code, but this work does not buy hosting. A free remote app host that stores the token file on someone else’s disk would be a worse match for an internal company file and is not recommended.
 

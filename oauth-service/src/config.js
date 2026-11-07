@@ -1,8 +1,35 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SERVICE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO_ROOT = path.resolve(SERVICE_ROOT, "..");
+
+export function isInsideDir(parent, child, pathApi = path) {
+  const root = pathApi.resolve(parent);
+  const target = pathApi.resolve(child);
+  const relative = pathApi.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !pathApi.isAbsolute(relative));
+}
+
+export function findGitRoot(start, pathApi = path, exists = fs.existsSync) {
+  let current = pathApi.resolve(start);
+  while (true) {
+    if (exists(pathApi.join(current, ".git"))) return current;
+    const parent = pathApi.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+export function isForbiddenDataDir(dataDir, options = {}) {
+  const pathApi = options.pathApi || path;
+  const serviceRoot = options.serviceRoot || SERVICE_ROOT;
+  const gitRoot = options.gitRoot === undefined ? findGitRoot(serviceRoot, pathApi) : options.gitRoot;
+  const resolved = pathApi.resolve(dataDir);
+  if (isInsideDir(serviceRoot, resolved, pathApi)) return true;
+  if (gitRoot && isInsideDir(gitRoot, resolved, pathApi)) return true;
+  return false;
+}
 
 function required(env, name, problems) {
   const value = env[name];
@@ -58,11 +85,21 @@ export function loadConfig(env) {
   let dataDir = "";
   if (dataDirRaw) {
     dataDir = path.resolve(dataDirRaw);
-    const insideRepo = dataDir === REPO_ROOT || dataDir.startsWith(REPO_ROOT + path.sep);
-    if (insideRepo) problems.push("DATA_DIR must be outside the repository");
+    if (isForbiddenDataDir(dataDir)) problems.push("DATA_DIR must be outside the repository");
   }
 
   const production = environment === "production";
+  const pinned = JSON.parse(fs.readFileSync(path.join(SERVICE_ROOT, "host-settings.json"), "utf8"));
+  if (production) {
+    if (pub && pub.origin !== new URL(pinned.publicBaseUrl).origin) {
+      problems.push("production PUBLIC_BASE_URL must be https://mapleridgecpa.com");
+    }
+    if (redirectUri && redirectUri !== pinned.redirectUri) {
+      problems.push("production QBO_REDIRECT_URI must be https://mapleridgecpa.com/callback");
+    }
+    if (bindHost !== pinned.bindHost) problems.push("production BIND_HOST must be 127.0.0.1");
+    if (port !== pinned.port) problems.push("production PORT must be 8787");
+  }
   if (production) {
     if (redirect && redirect.protocol !== "https:") problems.push("production QBO_REDIRECT_URI must use https");
     if (pub && pub.protocol !== "https:") problems.push("production PUBLIC_BASE_URL must use https");

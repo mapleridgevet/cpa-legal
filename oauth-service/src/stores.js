@@ -1,21 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
+import { saveRestricted } from "./acl.js";
 
 export function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 function writePrivate(filePath, contents) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, contents, { mode: 0o600 });
-  fs.renameSync(tmp, filePath);
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch {
-    // Windows ACLs are not Unix modes. The directory is still outside the repository.
-  }
+  saveRestricted(filePath, contents);
 }
 
 export function createMemoryStateStore() {
