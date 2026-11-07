@@ -13,5 +13,6 @@ try {
 const app = createApp({ config, fetchImpl: globalThis.fetch });
 const server = http.createServer(app.handler);
 server.listen(config.port, config.bindHost, () => {
-  console.error(`cpa-oauth-service listening on ${config.bindHost}:${config.port}`);
+  const mode = config.oauthConfigured ? "oauth" : "setup";
+  console.error(`cpa-oauth-service listening on ${config.bindHost}:${config.port} mode=${mode}`);
 });

@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import { openSeal, readCookie, seal, serializeCookie } from "./cookies.js";
 import { createLogger } from "./log.js";
+import { createFileThrottleStore, createLoginThrottle } from "./login-throttle.js";
 import { buildAuthorizeUrl, exchangeCode, revokeToken } from "./oauth.js";
+import { assessIntuitPair } from "./secret-policy.js";
 import { createFileStateStore, createFileTokenStore, sha256 } from "./stores.js";
-import path from "node:path";
 
 const RESULTS = {
   stored: "Authorization succeeded at Intuit and tokens were stored on this computer. They are not shown. The Windows connector has not been switched to this file.",
@@ -20,6 +22,10 @@ const RESULTS = {
   revoke_failed: "Revocation failed. Local tokens were kept. This is not a successful disconnect.",
   no_token: "No local token file was found. Nothing was revoked.",
   signin: "Sign in required.",
+  not_configured: "QuickBooks is not configured. No request was sent to Intuit.",
+  revoke_not_configured: "Revocation is not configured. No request was sent to Intuit. Local tokens were not changed.",
+  callback_not_configured: "QuickBooks is not configured. No authorization code was exchanged.",
+  throttled: "Sign-in is temporarily unavailable. Try again later.",
 };
 
 function escapeHtml(value) {
@@ -90,16 +96,42 @@ function csrfMatch(session, supplied) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function quickbooksState(oauthConfigured, tokenStore) {
+  if (!oauthConfigured) return "not-connected";
+  try {
+    const stored = tokenStore.load();
+    if (stored && typeof stored.refreshToken === "string" && stored.refreshToken.length > 0) return "connected";
+  } catch {
+    return "not-connected";
+  }
+  return "not-connected";
+}
+
 export function createApp(options) {
   const config = options.config;
+  const intuit = assessIntuitPair(config.clientId || "", config.clientSecret || "");
+  if (!intuit.ok) throw new Error(`Refusing to start: ${intuit.message}`);
+  const oauthConfigured = intuit.oauthConfigured;
   const now = options.now || (() => Date.now());
   const fetchImpl = options.fetchImpl;
   const log = options.log || createLogger();
-  log.noteSecret(config.clientSecret);
+  if (oauthConfigured) log.noteSecret(intuit.clientSecret);
   log.noteSecret(config.ownerPassword);
   log.noteSecret(config.sessionSecret);
   const tokenStore = options.tokenStore || createFileTokenStore(path.join(config.dataDir, "qbo-tokens.json"));
   const stateStore = options.stateStore || createFileStateStore(path.join(config.dataDir, "oauth-state.json"));
+  const throttle = options.throttle || createLoginThrottle({
+    now,
+    store: createFileThrottleStore(path.join(config.dataDir, "login-throttle.json")),
+  });
+
+  function refuseThrottled(res, status) {
+    const retryAfter = Math.max(1, Math.ceil(status.retryAfterMs / 1000));
+    send(res, 429, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Retry-After": String(retryAfter),
+    }, RESULTS.throttled);
+  }
 
   function sessionOf(req) {
     return openSeal(readCookie(req, config), config.sessionSecret, now());
@@ -115,7 +147,15 @@ export function createApp(options) {
     const pathName = requestUrl.pathname;
     try {
       if (req.method === "GET" && pathName === "/health") {
-        send(res, 200, { "Content-Type": "application/json; charset=utf-8" }, JSON.stringify({ ok: true }));
+        const mode = oauthConfigured ? "oauth" : "setup";
+        const body = {
+          ok: true,
+          listening: true,
+          mode,
+          oauth: oauthConfigured ? "ready" : "not-configured",
+          quickbooks: quickbooksState(oauthConfigured, tokenStore),
+        };
+        send(res, 200, { "Content-Type": "application/json; charset=utf-8" }, JSON.stringify(body));
         return;
       }
       const session = sessionOf(req);
@@ -124,10 +164,24 @@ export function createApp(options) {
         return;
       }
       if (req.method === "POST" && pathName === "/login") {
+        const gate = throttle.check(now());
+        if (gate.locked) {
+          log.info("login_throttled", { path: pathName });
+          refuseThrottled(res, gate);
+          return;
+        }
         const form = await readForm(req);
         if (!passwordsMatch(form.get("password") || "", config.ownerPassword)) {
-          log.info("login_failed", { path: pathName });
-          send(res, 401, { "Content-Type": "text/plain; charset=utf-8" }, "Sign in required");
+          const failed = throttle.recordFailure(now());
+          log.info(failed.locked ? "login_throttled" : "login_failed", { path: pathName });
+          if (failed.locked) refuseThrottled(res, failed);
+          else send(res, 401, { "Content-Type": "text/plain; charset=utf-8" }, "Sign in required");
+          return;
+        }
+        const admitted = throttle.recordSuccess(now());
+        if (admitted.locked) {
+          log.info("login_throttled", { path: pathName });
+          refuseThrottled(res, admitted);
           return;
         }
         const fresh = {
@@ -148,11 +202,16 @@ export function createApp(options) {
           send(res, 403, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.csrf);
           return;
         }
+        if (!oauthConfigured) {
+          log.info("connect_unavailable", { path: pathName });
+          send(res, 409, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.not_configured);
+          return;
+        }
         const state = crypto.randomBytes(32).toString("base64url");
         log.noteSecret(state);
         stateStore.put(sha256(state), { sid: session.sid, exp: now() + config.stateTtlMs, used: false });
         const location = buildAuthorizeUrl({
-          clientId: config.clientId,
+          clientId: intuit.clientId,
           redirectUri: config.redirectUri,
           scope: config.scope,
           state,
@@ -162,6 +221,11 @@ export function createApp(options) {
         return;
       }
       if (req.method === "GET" && pathName === "/callback") {
+        if (!oauthConfigured) {
+          log.info("callback_unavailable", { path: pathName });
+          send(res, 404, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.callback_not_configured);
+          return;
+        }
         const code = requestUrl.searchParams.get("code");
         const state = requestUrl.searchParams.get("state");
         const oauthError = requestUrl.searchParams.get("error");
@@ -189,8 +253,8 @@ export function createApp(options) {
           return;
         }
         const exchanged = await exchangeCode({
-          clientId: config.clientId,
-          clientSecret: config.clientSecret,
+          clientId: intuit.clientId,
+          clientSecret: intuit.clientSecret,
           redirectUri: config.redirectUri,
           code,
           fetchImpl,
@@ -230,9 +294,12 @@ export function createApp(options) {
         return;
       }
       if (req.method === "GET" && pathName === "/disconnect") {
+        const extra = oauthConfigured
+          ? ""
+          : "<p>QuickBooks credentials are not configured. This page cannot revoke access.</p>";
         send(res, 200, { "Content-Type": "text/html; charset=utf-8" }, page(
           "Disconnect",
-          `<p>Opening this address does not revoke QuickBooks access.</p><p><a href="/">Owner sign-in</a> is required before a revocation request is sent.</p>`,
+          `<p>Opening this address does not revoke QuickBooks access.</p><p><a href="/">Owner sign-in</a> is required before a revocation request is sent.</p>${extra}`,
         ));
         return;
       }
@@ -246,6 +313,11 @@ export function createApp(options) {
           send(res, 403, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.csrf);
           return;
         }
+        if (!oauthConfigured) {
+          log.info("revoke_unavailable", { path: pathName });
+          send(res, 409, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.revoke_not_configured);
+          return;
+        }
         const stored = tokenStore.load();
         if (!stored || typeof stored.refreshToken !== "string" || stored.refreshToken === "") {
           log.info("revoke_skipped", { reason: "no_token" });
@@ -257,8 +329,8 @@ export function createApp(options) {
         let revoked;
         try {
           revoked = await revokeToken({
-            clientId: config.clientId,
-            clientSecret: config.clientSecret,
+            clientId: intuit.clientId,
+            clientSecret: intuit.clientSecret,
             token: stored.refreshToken,
             fetchImpl,
           });
@@ -285,7 +357,7 @@ export function createApp(options) {
   function loginHtml() {
     return page(
       "Owner sign-in",
-      `<p>This is the CPA QuickBooks sign-in for the authorized Owner. It is not the public legal site, and it does not connect QuickBooks until you continue after signing in.</p>
+      `<p>This is the CPA QuickBooks sign-in for the authorized Owner. It is not the public legal site. Signing in does not connect QuickBooks.</p>
 <form method="post" action="/login">
   <label>Owner password <input name="password" type="password" autocomplete="current-password" required /></label>
   <button type="submit">Sign in</button>
@@ -295,6 +367,21 @@ export function createApp(options) {
 
   function controlsHtml(session) {
     const csrf = escapeHtml(session.csrf);
+    if (!oauthConfigured) {
+      return page(
+        "Owner signed in",
+        `<p>Signed in. QuickBooks is not configured. Connect and revoke are unavailable. Submitting either form does not contact Intuit, does not store an authorization attempt, and does not delete local tokens.</p>
+<form method="post" action="/connect">
+  <input type="hidden" name="csrf" value="${csrf}" />
+  <button type="submit">Connect unavailable</button>
+</form>
+<form method="post" action="/disconnect">
+  <input type="hidden" name="csrf" value="${csrf}" />
+  <button type="submit">Revoke unavailable</button>
+</form>
+<p><a href="/disconnect">Disconnect information</a></p>`,
+      );
+    }
     return page(
       "QuickBooks authorization",
       `<p>Signed in. Connect sends you to Intuit. Disconnect sends a revocation request only after you submit it. Tokens are not displayed.</p>

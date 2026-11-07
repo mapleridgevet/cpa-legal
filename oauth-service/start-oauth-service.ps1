@@ -7,7 +7,7 @@ $SecretPath = Join-Path $DataDir "secrets.clixml"
 $ConfigPath = Join-Path $DataDir "service-config.json"
 
 if (-not (Test-Path -LiteralPath $SecretPath) -or -not (Test-Path -LiteralPath $ConfigPath)) {
-  Write-Host "Not started. Credentials are not configured. OAuth was not attempted."
+  Write-Host "Not started. Owner sign-in is not configured. OAuth was not attempted."
   exit 1
 }
 
@@ -33,7 +33,34 @@ function Convert-FromSecure {
   }
 }
 
-$names = @("QBO_CLIENT_ID", "QBO_CLIENT_SECRET", "OWNER_PASSWORD", "SESSION_SECRET")
+function Test-SecurePresent {
+  param($Bag, [string]$Name, [int]$Minimum)
+  if ($null -eq $Bag) { return $false }
+  $value = $Bag.$Name
+  return ($null -ne $value -and $value -is [System.Security.SecureString] -and $value.Length -ge $Minimum)
+}
+
+if (-not (Test-SecurePresent $secrets "OWNER_PASSWORD" 16) -or -not (Test-SecurePresent $secrets "SESSION_SECRET" 32)) {
+  Write-Host "Not started. Owner sign-in is not configured. OAuth was not attempted."
+  exit 1
+}
+$hasClientId = Test-SecurePresent $secrets "QBO_CLIENT_ID" 1
+$hasClientSecret = Test-SecurePresent $secrets "QBO_CLIENT_SECRET" 1
+if ($hasClientId -xor $hasClientSecret) {
+  Write-Host "Not started. Intuit credentials are partial. OAuth was not attempted."
+  exit 1
+}
+
+$names = @("OWNER_PASSWORD", "SESSION_SECRET")
+if ($hasClientId -and $hasClientSecret) {
+  $names += @("QBO_CLIENT_ID", "QBO_CLIENT_SECRET")
+  Write-Host "Starting with QuickBooks credentials configured. Tokens are not displayed."
+} else {
+  Remove-Item Env:QBO_CLIENT_ID -ErrorAction SilentlyContinue
+  Remove-Item Env:QBO_CLIENT_SECRET -ErrorAction SilentlyContinue
+  Write-Host "Starting in setup mode. OAuth is not configured."
+}
+
 try {
   foreach ($name in $names) {
     Set-Item -Path "Env:$name" -Value (Convert-FromSecure $secrets.$name)
@@ -50,7 +77,7 @@ try {
   & node src/index.js
   exit $LASTEXITCODE
 } finally {
-  foreach ($name in $names) {
+  foreach ($name in @("OWNER_PASSWORD", "SESSION_SECRET", "QBO_CLIENT_ID", "QBO_CLIENT_SECRET")) {
     Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
   }
 }

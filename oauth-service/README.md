@@ -8,8 +8,9 @@ Nothing in this folder is a live Intuit connection. No client secret, token, rea
 
 After configuration, the process listens on `127.0.0.1` only.
 
-- `GET /` is the sign-in page. The Owner password comes from `OWNER_PASSWORD`. A wrong password returns 401 and does not set a session.
-- After sign-in, **Connect or reconnect QuickBooks** creates a single-use `state` bound to that session, expiring in 10 minutes, and redirects only to `https://appcenter.intuit.com/connect/oauth2`.
+- `GET /` is the sign-in page. The Owner password comes from `OWNER_PASSWORD`. A wrong password returns 401 and does not set a session. Five failures in 15 minutes lock sign-in for the rest of that window. The lock is one process-wide bucket. `X-Forwarded-For`, `CF-Connecting-IP`, and similar headers do not create a new bucket.
+- Before Intuit production keys exist, the process can listen in setup mode. `GET /` and `GET /disconnect` work. Connect, callback, and revoke do not call Intuit, do not store an authorization attempt, and do not delete a token file. Health says `mode` is `setup`, `oauth` is `not-configured`, and `quickbooks` is `not-connected`.
+- After both production keys are saved, **Connect or reconnect QuickBooks** creates a single-use `state` bound to that session, expiring in 10 minutes, and redirects only to `https://appcenter.intuit.com/connect/oauth2`. Health then says `oauth` is `ready`. `quickbooks` is `connected` only when a local refresh token is stored. One key without the other refuses to start. Placeholder values are refused.
 - `GET /callback` accepts the authorization code only when the state matches that session, is unused, and is unexpired. It then exchanges the code at Intuit’s token endpoint with the client secret. Tokens are written to a file under `DATA_DIR` with mode `0600` and are not returned in the browser or by any download route.
 - **Revoke QuickBooks tokens** calls `POST https://developer.api.intuit.com/v2/oauth2/tokens/revoke`. HTTP 200 clears the local file. Any other result, including a thrown network error, keeps the file and says the disconnect was not successful.
 - `GET /disconnect` does not revoke anything. It is safe for Intuit to land a browser there.
@@ -32,15 +33,15 @@ Intuit production redirect URIs must be HTTPS and cannot be an IP address or a G
 
 Verified free front door: [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) on Cloudflare’s free plan. Cloudflare’s current docs require a Cloudflare account and a domain whose DNS Cloudflare can publish. A quick tunnel hostname on `trycloudflare.com` changes when the process restarts, so it is not a redirect URI to register with Intuit.
 
-The domain `mapleridgecpa.com` is active at Cloudflare, and the named tunnel `mapleridge-cpa` is installed on the Company PC. No hostname route has been added. This repository does not change Cloudflare, and it has not been installed on that PC.
+The domain `mapleridgecpa.com` is active at Cloudflare. The Owner added the named tunnel `mapleridge-cpa` and published `mapleridgecpa.com` to `http://127.0.0.1:8787`. This repository does not change Cloudflare.
 
-When the Owner adds the route, it must be hostname `mapleridgecpa.com` to origin `http://127.0.0.1:8787`. Do not use `www`, and do not use `mapleridgevet.github.io`.
+`install.ps1` copies the program to `C:\Users\naesm\cpa-oauth-service` and writes non-secret settings under `C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth`. It does not write into `C:\Users\naesm\quickbooks-card-connector`. With no switch it runs the tests and the secret-free health check, then stops. It does not listen and does not contact Intuit.
 
-`install.ps1` copies the program to `C:\Users\naesm\cpa-oauth-service` and writes non-secret settings under `C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth`. It does not write into `C:\Users\naesm\quickbooks-card-connector`. Without `-ConfigureSecrets` it runs the tests and the secret-free health check, then stops. It does not listen and does not contact Intuit. `-ConfigureSecrets` prompts with hidden input and stores the values in a DPAPI file for the current Windows user. It still does not start the listener.
+`-ConfigureOwner` prompts, with hidden input, for the owner password (16+) and session secret (32+) and stores them in a DPAPI file for the current Windows user. It does not ask for Intuit keys and does not start the listener. `-ConfigureIntuit` prompts for the production client id and secret together, refuses a placeholder or a single value, and replaces the secret file only after both are accepted. The owner password, session secret, `service-config.json`, and token files stay in place. The listener still does not start.
 
-Do not run `start-oauth-service.ps1` until the Intuit production client id and secret exist and the tunnel route is in place. The start script refuses to run when that secret file is absent.
+`start-oauth-service.ps1` is the only script that listens. Without owner secrets it exits. With owner secrets and no Intuit keys it listens in setup mode. With both Intuit keys it enables OAuth. With only one Intuit key it exits. Starting it is what makes `https://mapleridgecpa.com/` answer, because the tunnel route is already published. Do not start it until that publication is intended. Intuit has not been asked to accept the setup-only pages.
 
-Tradeoff: Cloudflare terminates TLS, so the authorization code in the callback URL and the token-exchange body pass through Cloudflare. A tunnel also stops when the PC or `cloudflared` stops. A paid VM with its own certificate would avoid Cloudflare seeing the code, but this work does not buy hosting. A free remote app host that stores the token file on someone else’s disk would be a worse match for an internal company file and is not recommended.
+Tradeoff: Cloudflare terminates TLS, so the owner password, and later the authorization code and token-exchange body, pass through Cloudflare. A tunnel also stops when the PC or `cloudflared` stops. A paid VM with its own certificate would avoid Cloudflare seeing the code, but this work does not buy hosting. A free remote app host that stores the token file on someone else’s disk would be a worse match for an internal company file and is not recommended.
 
 ## Connector gap
 

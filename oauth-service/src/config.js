@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assessIntuitPair } from "./secret-policy.js";
 
 const SERVICE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -55,8 +56,8 @@ export function loadConfig(env) {
   if (environment && environment !== "sandbox" && environment !== "production") {
     problems.push("QBO_ENVIRONMENT must be sandbox or production");
   }
-  const clientId = required(env, "QBO_CLIENT_ID", problems);
-  const clientSecret = required(env, "QBO_CLIENT_SECRET", problems);
+  const intuit = assessIntuitPair(env.QBO_CLIENT_ID, env.QBO_CLIENT_SECRET);
+  if (!intuit.ok) problems.push(intuit.message);
   const redirectUri = required(env, "QBO_REDIRECT_URI", problems);
   const ownerPassword = required(env, "OWNER_PASSWORD", problems);
   const sessionSecret = required(env, "SESSION_SECRET", problems);
@@ -119,8 +120,9 @@ export function loadConfig(env) {
   }
 
   return {
-    clientId,
-    clientSecret,
+    clientId: intuit.clientId,
+    clientSecret: intuit.clientSecret,
+    oauthConfigured: intuit.oauthConfigured,
     redirectUri,
     environment,
     scope,

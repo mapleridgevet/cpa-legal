@@ -20,6 +20,10 @@ export const REQUIRED = [
   "src/acl.js",
   "src/preflight.js",
   "src/index.js",
+  "src/app.js",
+  "src/login-throttle.js",
+  "src/secret-policy.js",
+  "src/check-intuit-credentials.js",
   "test/state-file.test.js",
 ];
 

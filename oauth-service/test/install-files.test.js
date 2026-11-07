@@ -22,6 +22,9 @@ function writeRelease(dir, extra = {}) {
     "src/preflight.js",
     "src/index.js",
     "src/app.js",
+    "src/login-throttle.js",
+    "src/secret-policy.js",
+    "src/check-intuit-credentials.js",
     "test/state-file.test.js",
   ]) {
     const file = path.join(dir, rel);
@@ -39,6 +42,16 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.equal(copyAt > 0 && placedAt > copyAt && protectAt > placedAt, true);
   assert.equal(installer.includes("Copy-Item"), false);
   assert.equal(installer.includes("Set-Acl"), false);
+  assert.equal(installer.includes("$ConfigureOwner"), true);
+  assert.equal(installer.includes("$ConfigureIntuit"), true);
+  assert.equal(installer.includes("src\\index.js") || installer.includes("src/index.js"), false);
+  assert.equal(installer.includes("start-oauth-service.ps1"), false);
+  assert.match(installer, /Move-Item -LiteralPath \$temp -Destination \$dest/);
+  assert.match(installer, /check-intuit-credentials\.js/);
+  const starter = fs.readFileSync(path.join(releaseRoot, "start-oauth-service.ps1"), "utf8");
+  assert.match(starter, /Intuit credentials are partial/);
+  assert.match(starter, /Starting in setup mode/);
+  assert.equal(starter.includes("QBO_CLIENT_ID") && starter.includes("OWNER_PASSWORD"), true);
   const winUrl = "file:///C:/Users/naesm/cpa-oauth-service/test/install-files.test.js";
   const fromPathname = path.win32.resolve(path.win32.dirname(new URL(winUrl).pathname), "..");
   assert.equal(releaseRootFromModuleUrl(winUrl, path.win32), "C:\\Users\\naesm\\cpa-oauth-service");
@@ -74,6 +87,12 @@ test("fresh install and upgrade both place protect-path.js without nesting src",
   assert.equal(fs.readFileSync(path.join(data, "service-config.json"), "utf8"), "keep-config");
   assert.equal(fs.readFileSync(path.join(data, "qbo-tokens.json"), "utf8"), "keep-token");
   assert.equal(fs.readFileSync(path.join(data, "secrets.clixml"), "utf8"), "keep-secret");
+  assert.equal(fs.readFileSync(path.join(connector, "authorize-quickbooks.ps1"), "utf8"), "keep-connector");
+
+  copyRelease(source, program);
+  assert.equal(fs.existsSync(path.join(program, "src", "src")), false);
+  assert.equal(fs.existsSync(path.join(program, "test", "test")), false);
+  assert.equal(fs.readFileSync(path.join(data, "qbo-tokens.json"), "utf8"), "keep-token");
   assert.equal(fs.readFileSync(path.join(connector, "authorize-quickbooks.ps1"), "utf8"), "keep-connector");
 
   const fresh = path.join(root, "fresh");

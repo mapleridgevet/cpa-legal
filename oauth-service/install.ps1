@@ -1,7 +1,10 @@
 # Places the OAuth program and checks it. Does not start it and does not call Intuit or Cloudflare.
-# Secrets are accepted only with -ConfigureSecrets, as masked prompts, never as arguments.
+# -ConfigureOwner saves the owner password and session secret only.
+# -ConfigureIntuit adds both production keys later and keeps the owner secrets.
+# Prompts are masked. Secrets are never arguments.
 param(
-  [switch]$ConfigureSecrets
+  [switch]$ConfigureOwner,
+  [switch]$ConfigureIntuit
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +37,58 @@ function Read-MaskedSecret {
     throw "That value is too short. Nothing was saved and the service was not started."
   }
   return $secret
+}
+
+function Convert-FromSecure {
+  param([Security.SecureString]$Value)
+  $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Value)
+  try {
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+  }
+}
+
+function Test-SecurePresent {
+  param($Bag, [string]$Name, [int]$Minimum)
+  if ($null -eq $Bag) { return $false }
+  $value = $Bag.$Name
+  return ($null -ne $value -and $value -is [System.Security.SecureString] -and $value.Length -ge $Minimum)
+}
+
+function Get-IntuitPresence {
+  param($Bag)
+  return @{
+    Id = (Test-SecurePresent $Bag "QBO_CLIENT_ID" 1)
+    Secret = (Test-SecurePresent $Bag "QBO_CLIENT_SECRET" 1)
+  }
+}
+
+function Save-SecretBag {
+  param($Bag)
+  $dest = Join-Path $DataDir "secrets.clixml"
+  $temp = Join-Path $DataDir ("secrets-" + [guid]::NewGuid().ToString("n") + ".tmp")
+  $backup = Join-Path $DataDir ("secrets-" + [guid]::NewGuid().ToString("n") + ".bak")
+  $Bag | Export-Clixml -LiteralPath $temp
+  Protect-OwnerOnly $temp
+  $movedAside = $false
+  try {
+    if (Test-Path -LiteralPath $dest) {
+      Move-Item -LiteralPath $dest -Destination $backup -Force
+      $movedAside = $true
+    }
+    Move-Item -LiteralPath $temp -Destination $dest -Force
+    Protect-OwnerOnly $dest
+    if ($movedAside -and (Test-Path -LiteralPath $backup)) {
+      Remove-Item -LiteralPath $backup -Force
+    }
+  } catch {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
+    if ($movedAside -and (Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $dest)) {
+      Move-Item -LiteralPath $backup -Destination $dest -Force
+    }
+    throw
+  }
 }
 
 Assert-NotConnector $ProgramDir
@@ -79,7 +134,7 @@ $publicConfig = [ordered]@{
   QBO_SCOPE = "com.intuit.quickbooks.accounting"
 }
 $configPath = Join-Path $DataDir "service-config.json"
-foreach ($kept in @("secrets.clixml", "qbo-tokens.json", "oauth-state.json")) {
+foreach ($kept in @("secrets.clixml", "qbo-tokens.json", "oauth-state.json", "login-throttle.json")) {
   if (Test-Path -LiteralPath (Join-Path $DataDir $kept)) {
     Write-Host "Left existing $kept in place."
   }
@@ -91,18 +146,67 @@ if (Test-Path -LiteralPath $configPath) {
   Protect-OwnerOnly $configPath
 }
 
-if ($ConfigureSecrets) {
-  $bag = [ordered]@{
-    QBO_CLIENT_ID = Read-MaskedSecret "Intuit production client id (input stays hidden)" 8
-    QBO_CLIENT_SECRET = Read-MaskedSecret "Intuit production client secret (input stays hidden)" 8
-    OWNER_PASSWORD = Read-MaskedSecret "Owner password, 16 or more characters (input stays hidden)" 16
-    SESSION_SECRET = Read-MaskedSecret "Session secret, 32 or more characters (input stays hidden)" 32
-  }
+if ($ConfigureOwner -and $ConfigureIntuit) {
+  throw "Choose one configuration step. Nothing was saved and the service was not started."
+}
+
+$existing = $null
+$presence = @{ Id = $false; Secret = $false }
+if ($ConfigureOwner -or $ConfigureIntuit) {
   $secretPath = Join-Path $DataDir "secrets.clixml"
-  $bag | Export-Clixml -LiteralPath $secretPath
-  Protect-OwnerOnly $secretPath
-  Write-Host "Secrets were saved for this Windows user only. They were not displayed."
-  Write-Host "The service was not started. OAuth was not attempted."
+  if (Test-Path -LiteralPath $secretPath) {
+    $existing = Import-Clixml -LiteralPath $secretPath
+  }
+  $presence = Get-IntuitPresence $existing
+}
+
+if ($ConfigureOwner) {
+  if ($presence.Id -xor $presence.Secret) {
+    throw "Intuit credentials are partial. Nothing was saved and the service was not started."
+  }
+  $ownerPassword = Read-MaskedSecret "Owner password, 16 or more characters (input stays hidden)" 16
+  $sessionSecret = Read-MaskedSecret "Session secret, 32 or more characters (input stays hidden)" 32
+  $bag = [ordered]@{
+    OWNER_PASSWORD = $ownerPassword
+    SESSION_SECRET = $sessionSecret
+  }
+  if ($presence.Id -and $presence.Secret) {
+    $bag.QBO_CLIENT_ID = $existing.QBO_CLIENT_ID
+    $bag.QBO_CLIENT_SECRET = $existing.QBO_CLIENT_SECRET
+  }
+  Save-SecretBag $bag
+  Write-Host "Owner sign-in secrets were saved for this Windows user only. They were not displayed."
+  Write-Host "Intuit keys were not requested. The service was not started. OAuth was not attempted."
+  exit 0
+}
+
+if ($ConfigureIntuit) {
+  if (-not (Test-SecurePresent $existing "OWNER_PASSWORD" 16) -or -not (Test-SecurePresent $existing "SESSION_SECRET" 32)) {
+    throw "Owner sign-in is not configured. Nothing was saved and the service was not started."
+  }
+  $clientId = Read-MaskedSecret "Intuit production client id (input stays hidden)" 8
+  $clientSecret = Read-MaskedSecret "Intuit production client secret (input stays hidden)" 8
+  $env:QBO_CLIENT_ID = Convert-FromSecure $clientId
+  $env:QBO_CLIENT_SECRET = Convert-FromSecure $clientSecret
+  $accepted = $false
+  try {
+    & node (Join-Path $ProgramDir "src\check-intuit-credentials.js")
+    if ($LASTEXITCODE -eq 0) { $accepted = $true }
+  } finally {
+    Remove-Item Env:QBO_CLIENT_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:QBO_CLIENT_SECRET -ErrorAction SilentlyContinue
+  }
+  if (-not $accepted) {
+    throw "Intuit credentials were refused. Nothing was saved and the service was not started."
+  }
+  Save-SecretBag ([ordered]@{
+    OWNER_PASSWORD = $existing.OWNER_PASSWORD
+    SESSION_SECRET = $existing.SESSION_SECRET
+    QBO_CLIENT_ID = $clientId
+    QBO_CLIENT_SECRET = $clientSecret
+  })
+  Write-Host "Intuit production keys were saved. Owner secrets, config, and token files were kept."
+  Write-Host "The values were not displayed. The service was not started. OAuth was not attempted."
   exit 0
 }
 
@@ -122,6 +226,6 @@ try {
 
 Write-Host "Program directory: $ProgramDir"
 Write-Host "Data directory: $DataDir"
-Write-Host "OAuth was not attempted. No listener was started. No Intuit credentials are stored."
-Write-Host "Cloudflare was not changed. The tunnel route still has to be hostname mapleridgecpa.com to http://127.0.0.1:8787."
+Write-Host "OAuth was not attempted. No listener was started."
+Write-Host "Cloudflare was not changed. This script does not publish the sign-in page."
 exit 0
