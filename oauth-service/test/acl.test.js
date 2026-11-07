@@ -18,19 +18,18 @@ test("Windows ACL failure deletes the token file and does not report success", (
   assert.equal(fs.existsSync(filePath), false);
 });
 
-test("Windows ACL must be one non-inherited Allow entry for the owner", () => {
-  assert.equal(evaluateWindowsAclReport("PROTECTED|True\nNATESPC\\naesm|FullControl|False|Allow\n", "naesm").ok, true);
-  const everyone = evaluateWindowsAclReport("PROTECTED|True\nEveryone|FullControl|False|Allow\n", "naesm");
-  assert.equal(everyone.ok, false);
-  const inherited = evaluateWindowsAclReport("PROTECTED|True\nBUILTIN\\Users|ReadAndExecute|True|Allow\n", "naesm");
-  assert.equal(inherited.ok, false);
-  const extra = evaluateWindowsAclReport(
-    "PROTECTED|True\nNATESPC\\naesm|FullControl|False|Allow\nNT AUTHORITY\\SYSTEM|FullControl|False|Allow\n",
-    "naesm",
-  );
-  assert.equal(extra.ok, false);
-  assert.match(WINDOWS_ACL_APPLY_SCRIPT, /SetAccessRuleProtection\(\$true, \$false\)/);
-  assert.equal(WINDOWS_ACL_APPLY_SCRIPT.includes("Everyone"), false);
+test("Windows ACL must be one non-inherited Allow entry for the current user SID", () => {
+  const owner = "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|True\nACE|S-1-5-21-1-2-3-1001|FullControl|False|Allow\n";
+  assert.equal(evaluateWindowsAclReport(owner).ok, true);
+  const everyone = "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|True\nACE|S-1-1-0|FullControl|False|Allow\n";
+  assert.equal(evaluateWindowsAclReport(everyone).ok, false);
+  const inherited = "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|True\nACE|S-1-5-32-545|ReadAndExecute|True|Allow\n";
+  assert.equal(evaluateWindowsAclReport(inherited).ok, false);
+  const extra = "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|True\nACE|S-1-5-21-1-2-3-1001|FullControl|False|Allow\nACE|S-1-5-18|FullControl|False|Allow\n";
+  assert.equal(evaluateWindowsAclReport(extra).ok, false);
+  assert.match(WINDOWS_ACL_APPLY_SCRIPT, /AccessControlSections\]::Access/);
+  assert.match(WINDOWS_ACL_APPLY_SCRIPT, /SetAccessControl\(\$acl\)/);
+  assert.equal(WINDOWS_ACL_APPLY_SCRIPT.includes("Set-Acl"), false);
 });
 
 test("a verified owner-only ACL is accepted and a weak ACL is refused", () => {
@@ -44,7 +43,7 @@ test("a verified owner-only ACL is accepted and a weak ACL is refused", () => {
       return { status: 0, stdout: "" };
     },
     read() {
-      return { status: 0, stdout: "PROTECTED|True\nNATESPC\\naesm|FullControl|False|Allow\n" };
+      return { status: 0, stdout: "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|True\nACE|S-1-5-21-1-2-3-1001|FullControl|False|Allow\n" };
     },
   });
   assert.equal(calls[0].target, "C:\\token-file");
@@ -57,7 +56,7 @@ test("a verified owner-only ACL is accepted and a weak ACL is refused", () => {
       return { status: 0, stdout: "" };
     },
     read() {
-      return { status: 0, stdout: "PROTECTED|False\nEveryone|FullControl|True|Allow\n" };
+      return { status: 0, stdout: "CURRENT|S-1-5-21-1-2-3-1001\nPROTECTED|False\nACE|S-1-1-0|FullControl|True|Allow\n" };
     },
   }), /not owner-only/);
 });

@@ -2,39 +2,54 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+// DACL only. Set-Acl persists the SACL too and demands SeSecurityPrivilege, which a normal
+// user does not have. GetAccessControl(Access) and SetAccessControl write the discretionary ACL.
 export const WINDOWS_ACL_APPLY_SCRIPT = `
 $ErrorActionPreference = 'Stop'
 $path = $env:CPA_ACL_PATH
-$user = $env:CPA_ACL_USER
-$item = Get-Item -LiteralPath $path
+$item = Get-Item -LiteralPath $path -Force
+$sections = [System.Security.AccessControl.AccessControlSections]::Access
+$acl = $item.GetAccessControl($sections)
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($identity in @($acl.Access | ForEach-Object { $_.IdentityReference })) {
+  $acl.PurgeAccessRules($identity)
+}
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 if ($item.PSIsContainer) {
-  $acl = New-Object System.Security.AccessControl.DirectorySecurity
   $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    $user,
+    $sid,
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
     [System.Security.AccessControl.PropagationFlags]::None,
     [System.Security.AccessControl.AccessControlType]::Allow
   )
 } else {
-  $acl = New-Object System.Security.AccessControl.FileSecurity
   $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    $user,
+    $sid,
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     [System.Security.AccessControl.AccessControlType]::Allow
   )
 }
-$acl.SetAccessRuleProtection($true, $false)
-$acl.SetAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
+$acl.AddAccessRule($rule)
+$item.SetAccessControl($acl)
 `.trim();
 
 export const WINDOWS_ACL_READ_SCRIPT = `
 $ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $env:CPA_ACL_PATH
+$path = $env:CPA_ACL_PATH
+$item = Get-Item -LiteralPath $path -Force
+$sections = [System.Security.AccessControl.AccessControlSections]::Access
+$acl = $item.GetAccessControl($sections)
+$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Write-Output ('CURRENT|' + $current)
 Write-Output ('PROTECTED|' + $acl.AreAccessRulesProtected)
 foreach ($ace in $acl.Access) {
-  Write-Output ($ace.IdentityReference.Value + '|' + $ace.FileSystemRights + '|' + $ace.IsInherited + '|' + $ace.AccessControlType)
+  if ($ace.IdentityReference -is [System.Security.Principal.SecurityIdentifier]) {
+    $aceSid = $ace.IdentityReference.Value
+  } else {
+    $aceSid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+  }
+  Write-Output ('ACE|' + $aceSid + '|' + $ace.FileSystemRights + '|' + $ace.IsInherited + '|' + $ace.AccessControlType)
 }
 `.trim();
 
@@ -47,23 +62,23 @@ function runPowerShell(script, target, user) {
   });
 }
 
-export function evaluateWindowsAclReport(stdout, user) {
+export function evaluateWindowsAclReport(stdout) {
   const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const current = lines.find((line) => line.startsWith("CURRENT|"));
+  const sid = current ? current.slice("CURRENT|".length) : "";
   const protectedLine = lines.find((line) => line.toUpperCase().startsWith("PROTECTED|"));
-  const aces = lines.filter((line) => !line.toUpperCase().startsWith("PROTECTED|")).map((line) => {
-    const [identity, rights, inherited, type] = line.split("|");
-    return { identity: identity || "", rights: rights || "", inherited: inherited || "", type: type || "" };
+  const aces = lines.filter((line) => line.startsWith("ACE|")).map((line) => {
+    const [, aceSid, rights, inherited, type] = line.split("|");
+    return { sid: aceSid || "", rights: rights || "", inherited: inherited || "", type: type || "" };
   });
   const problems = [];
+  if (!sid) problems.push("current user SID missing");
   if (!protectedLine || protectedLine.split("|")[1].toLowerCase() !== "true") {
     problems.push("inheritance is enabled");
   }
   if (aces.length !== 1) problems.push(`expected one access entry and found ${aces.length}`);
   const ace = aces[0];
-  const identity = (ace?.identity || "").toLowerCase();
-  const expected = String(user || "").toLowerCase();
-  const identityOk = identity === expected || identity.endsWith(`\\${expected}`);
-  if (!identityOk) problems.push(`identity is ${ace?.identity || "missing"}`);
+  if ((ace?.sid || "") !== sid) problems.push(`identity SID is ${ace?.sid || "missing"}`);
   if ((ace?.inherited || "").toLowerCase() !== "false") problems.push("access entry is inherited");
   if ((ace?.type || "").toLowerCase() !== "allow") problems.push("access entry is not Allow");
   const rights = ace?.rights || "";
@@ -83,7 +98,7 @@ function applyAndVerifyWindowsAcl(target, user, options) {
   if (!report || report.status !== 0) {
     throw new Error("Refusing to store tokens: Windows ACL could not be read back");
   }
-  const verdict = evaluateWindowsAclReport(report.stdout, user);
+  const verdict = evaluateWindowsAclReport(report.stdout);
   if (!verdict.ok) {
     throw new Error(`Refusing to store tokens: Windows ACL is not owner-only (${verdict.detail})`);
   }
@@ -116,7 +131,7 @@ export function assertOwnerOnlyFile(filePath) {
   if (!report || report.status !== 0) {
     throw new Error("Windows ACL could not be read back");
   }
-  const verdict = evaluateWindowsAclReport(report.stdout, user);
+  const verdict = evaluateWindowsAclReport(report.stdout);
   if (!verdict.ok) {
     throw new Error(`Windows ACL is not owner-only (${verdict.detail})`);
   }

@@ -21,31 +21,9 @@ function Assert-NotConnector {
 
 function Protect-OwnerOnly {
   param([string]$Target)
-  $user = $env:USERNAME
-  $item = Get-Item -LiteralPath $Target
-  if ($item.PSIsContainer) {
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-      $user,
-      [System.Security.AccessControl.FileSystemRights]::FullControl,
-      [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
-      [System.Security.AccessControl.PropagationFlags]::None,
-      [System.Security.AccessControl.AccessControlType]::Allow
-    )
-  } else {
-    $acl = New-Object System.Security.AccessControl.FileSecurity
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-      $user,
-      [System.Security.AccessControl.FileSystemRights]::FullControl,
-      [System.Security.AccessControl.AccessControlType]::Allow
-    )
-  }
-  $acl.SetAccessRuleProtection($true, $false)
-  $acl.SetAccessRule($rule)
-  Set-Acl -LiteralPath $Target -AclObject $acl
-  $check = Get-Acl -LiteralPath $Target
-  if (-not $check.AreAccessRulesProtected -or @($check.Access).Count -ne 1) {
-    throw "ACL on $Target is not limited to $user. Nothing was started."
+  & node (Join-Path $ProgramDir "src\protect-path.js") $Target
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not restrict the DACL. Nothing was started."
   }
 }
 
@@ -60,6 +38,18 @@ function Read-MaskedSecret {
 
 Assert-NotConnector $ProgramDir
 Assert-NotConnector $DataDir
+
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+  throw "Node.js 20 or newer was not found. The service was not started."
+}
+$versionText = & node -v
+if ($versionText -notmatch "^v(\d+)\.") {
+  throw "Could not read the Node.js version. The service was not started."
+}
+if ([int]$Matches[1] -lt 20) {
+  throw "Node.js 20 or newer is required. The service was not started."
+}
 
 if (-not $SourceDir.Equals([System.IO.Path]::GetFullPath($ProgramDir), [StringComparison]::OrdinalIgnoreCase)) {
   New-Item -ItemType Directory -Force -Path $ProgramDir | Out-Null
@@ -126,18 +116,6 @@ if ($ConfigureSecrets) {
   Write-Host "Secrets were saved for this Windows user only. They were not displayed."
   Write-Host "The service was not started. OAuth was not attempted."
   exit 0
-}
-
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) {
-  throw "Node.js 20 or newer was not found. The service was not started."
-}
-$versionText = & node -v
-if ($versionText -notmatch "^v(\d+)\.") {
-  throw "Could not read the Node.js version. The service was not started."
-}
-if ([int]$Matches[1] -lt 20) {
-  throw "Node.js 20 or newer is required. The service was not started."
 }
 
 Push-Location $ProgramDir
