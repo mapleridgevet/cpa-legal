@@ -36,53 +36,82 @@ $item.SetAccessControl($acl)
 
 export const WINDOWS_ACL_READ_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $OutputEncoding
 $path = $env:CPA_ACL_PATH
 $item = Get-Item -LiteralPath $path -Force
 $sections = [System.Security.AccessControl.AccessControlSections]::Access
 $acl = $item.GetAccessControl($sections)
-$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-Write-Output ('CURRENT|' + $current)
+$current = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+Write-Output ('CURRENT|' + $current.User.Value)
+Write-Output ('CURRENTNAME|' + $current.Name)
 Write-Output ('PROTECTED|' + $acl.AreAccessRulesProtected)
-foreach ($ace in $acl.Access) {
-  if ($ace.IdentityReference -is [System.Security.Principal.SecurityIdentifier]) {
-    $aceSid = $ace.IdentityReference.Value
-  } else {
-    $aceSid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+$entries = @($acl.Access)
+Write-Output ('ACCESSCOUNT|' + $entries.Count)
+foreach ($ace in $entries) {
+  $account = [string]$ace.IdentityReference
+  $sidText = ''
+  try {
+    if ($ace.IdentityReference -is [System.Security.Principal.SecurityIdentifier]) {
+      $sidText = [string]$ace.IdentityReference.Value
+    } else {
+      $sidText = [string]$ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    }
+  } catch {
+    $sidText = ''
   }
-  Write-Output ('ACE|' + $aceSid + '|' + $ace.FileSystemRights + '|' + $ace.IsInherited + '|' + $ace.AccessControlType)
+  Write-Output ((@('ACE', $sidText, $account, [string]$ace.FileSystemRights, [string]$ace.IsInherited, [string]$ace.AccessControlType) -join '|'))
 }
 `.trim();
 
+export function decodePowerShellStdout(stdout) {
+  const buffer = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout ?? ""), "utf8");
+  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return buffer.subarray(2).toString("utf16le");
+  if (buffer.length >= 4 && buffer[1] === 0x00 && buffer[3] === 0x00) return buffer.toString("utf16le");
+  return buffer.toString("utf8").replace(/^\uFEFF/, "");
+}
+
 function runPowerShell(script, target, user) {
-  return spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "-"], {
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "-"], {
     input: script,
-    encoding: "utf8",
+    encoding: "buffer",
     windowsHide: true,
     env: { ...process.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },
   });
+  if (!result) return result;
+  return { ...result, stdout: decodePowerShellStdout(result.stdout), stderr: decodePowerShellStdout(result.stderr) };
 }
 
 export function evaluateWindowsAclReport(stdout) {
-  const lines = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = decodePowerShellStdout(stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const current = lines.find((line) => line.startsWith("CURRENT|"));
   const sid = current ? current.slice("CURRENT|".length) : "";
+  const currentNameLine = lines.find((line) => line.startsWith("CURRENTNAME|"));
+  const currentName = currentNameLine ? currentNameLine.slice("CURRENTNAME|".length) : "";
   const protectedLine = lines.find((line) => line.toUpperCase().startsWith("PROTECTED|"));
+  const countLine = lines.find((line) => line.startsWith("ACCESSCOUNT|"));
   const aces = lines.filter((line) => line.startsWith("ACE|")).map((line) => {
-    const [, aceSid, rights, inherited, type] = line.split("|");
-    return { sid: aceSid || "", rights: rights || "", inherited: inherited || "", type: type || "" };
+    const parts = line.split("|");
+    if (parts.length >= 6) {
+      return { sid: parts[1] || "", account: parts[2] || "", rights: parts[3] || "", inherited: parts[4] || "", type: parts[5] || "" };
+    }
+    return { sid: parts[1] || "", account: "", rights: parts[2] || "", inherited: parts[3] || "", type: parts[4] || "" };
   });
   const problems = [];
-  if (!sid) problems.push("current user SID missing");
-  if (!protectedLine || protectedLine.split("|")[1].toLowerCase() !== "true") {
-    problems.push("inheritance is enabled");
+  if (!sid && !currentName) problems.push("current user SID missing");
+  if (!protectedLine || protectedLine.split("|")[1].toLowerCase() !== "true") problems.push("inheritance is enabled");
+  if (countLine && Number(countLine.slice("ACCESSCOUNT|".length)) !== aces.length) {
+    problems.push(`access count ${countLine.slice("ACCESSCOUNT|".length)} does not match ${aces.length} reported entries`);
   }
   if (aces.length !== 1) problems.push(`expected one access entry and found ${aces.length}`);
   const ace = aces[0];
-  if ((ace?.sid || "") !== sid) problems.push(`identity SID is ${ace?.sid || "missing"}`);
+  const sidOk = Boolean(sid) && ace?.sid === sid;
+  const nameOk = Boolean(currentName) && (ace?.account || "").toLowerCase() === currentName.toLowerCase();
+  if (!sidOk && !nameOk) problems.push(`identity SID is ${ace?.sid || "missing"}`);
   if ((ace?.inherited || "").toLowerCase() !== "false") problems.push("access entry is inherited");
   if ((ace?.type || "").toLowerCase() !== "allow") problems.push("access entry is not Allow");
   const rights = ace?.rights || "";
-  const canReadAndWrite = rights === "FullControl" || (rights.includes("Read") && rights.includes("Write"));
+  const canReadAndWrite = rights === "FullControl" || rights === "2032127" || (rights.includes("Read") && rights.includes("Write"));
   if (!canReadAndWrite) problems.push(`rights are ${rights || "missing"}`);
   return { ok: problems.length === 0, detail: problems.join("; ") || "owner-only" };
 }
