@@ -9,25 +9,30 @@ import { diagnoseDirectory } from "../src/acl-diagnostic.js";
 
 const FAKE_POWERSHELL = `
 const fs = require("node:fs");
-const chunks = [];
-process.stdin.on("data", (chunk) => chunks.push(chunk));
-process.stdin.on("end", () => {
-  const script = Buffer.concat(chunks).toString("utf8");
-  const mode = process.env.FAKE_PS_MODE || "utf8";
-  if (script.includes("B_COUNT")) {
-    fs.writeSync(1, "B_PROTECTED|True\\nB_COUNT|1\\nB_ACCOUNT|0|NATESPC\\\\naesm\\nB_RIGHTS|0|FullControl\\nB_INHERITED|0|False\\nB_TYPE|0|Allow\\nB_DONE\\n");
-    process.exit(0);
-  }
-  if (mode === "fail-apply" && script.includes("SetAccessControl")) process.exit(2);
-  if (script.includes("SetAccessControl")) process.exit(0);
-  if (mode === "read-fail") process.exit(3);
-  const report = process.env.FAKE_PS_REPORT || "";
-  const body = mode === "utf16"
-    ? Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(report, "utf16le")])
-    : Buffer.from(report, "utf8");
-  fs.writeSync(1, body);
+const args = process.argv.slice(2);
+if (args.includes("-Command") || !args.includes("-EncodedCommand")) {
+  process.stderr.write("stdin command mode dropped the loop\\n");
+  process.exit(4);
+}
+const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+if (!script.includes("foreach") && !script.includes("for (")) {
+  process.stderr.write("encoded script has no loop\\n");
+  process.exit(5);
+}
+const mode = process.env.FAKE_PS_MODE || "utf8";
+if (script.includes("B_COUNT")) {
+  fs.writeSync(1, "B_PROTECTED|True\\nB_COUNT|1\\nB_ACCOUNT|0|NATESPC\\\\naesm\\nB_RIGHTS|0|FullControl\\nB_INHERITED|0|False\\nB_TYPE|0|Allow\\nB_DONE\\n");
   process.exit(0);
-});
+}
+if (mode === "fail-apply" && script.includes("SetAccessControl")) process.exit(2);
+if (script.includes("SetAccessControl")) process.exit(0);
+if (mode === "read-fail") process.exit(3);
+const report = process.env.FAKE_PS_REPORT || "";
+const body = mode === "utf16"
+  ? Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(report, "utf16le")])
+  : Buffer.from(report, "utf8");
+fs.writeSync(1, body);
+process.exit(0);
 `;
 
 const goodReport = [
@@ -41,12 +46,12 @@ const goodReport = [
 function childOptions(mode, report = goodReport) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-fake-ps-"));
   const fixture = path.join(dir, "fake-powershell.cjs");
-  fs.writeFileSync(fixture, FAKE_POWERSHELL);
+  fs.writeFileSync(fixture, `#!/usr/bin/env node\n${FAKE_POWERSHELL}`);
+  fs.chmodSync(fixture, 0o755);
   return {
     platform: "win32",
     user: "naesm",
-    command: process.execPath,
-    args: [fixture],
+    command: fixture,
     env: { FAKE_PS_MODE: mode, FAKE_PS_REPORT: report },
   };
 }
@@ -97,5 +102,6 @@ test("directory diagnostic uses the child process and does not change the ACL", 
 test("packaged Windows launcher does not pass an invalid spawn encoding", () => {
   const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "acl.js"), "utf8");
   assert.equal(source.includes("encoding: \"buffer\"") || source.includes("encoding: 'buffer'"), false);
-  assert.match(source, /spawnSync\(/);
+  assert.match(source, /-EncodedCommand/);
+  assert.equal(source.includes('"-Command", "-"'), false);
 });

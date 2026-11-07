@@ -90,11 +90,15 @@ export function decodePowerShellStdout(stdout) {
   return buffer.toString("utf8").replace(/^\uFEFF/, "");
 }
 
+export function encodePowerShellCommand(script) {
+  const text = script.endsWith("\n") ? script : `${script}\n`;
+  return Buffer.from(text, "utf16le").toString("base64");
+}
+
 function runPowerShell(script, target, user, options = {}) {
   const command = options.command || "powershell.exe";
-  const args = options.args || ["-NoProfile", "-NonInteractive", "-Command", "-"];
+  const args = options.args || ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellCommand(script)];
   const result = spawnSync(command, args, {
-    input: script,
     windowsHide: true,
     env: { ...process.env, ...options.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },
   });
