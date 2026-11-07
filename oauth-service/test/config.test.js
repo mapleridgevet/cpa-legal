@@ -26,6 +26,12 @@ test("production configuration fails closed", () => {
   assert.throws(() => loadConfig(baseEnv({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "client-secret-value" })), /both be set or both be absent/);
   assert.throws(() => loadConfig(baseEnv({ QBO_CLIENT_ID: "placeholder", QBO_CLIENT_SECRET: "client-secret-value" })), /must not be a placeholder/);
   assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD: "" })), /OWNER_PASSWORD is missing/);
+  assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD: "   " })), /OWNER_PASSWORD is missing/);
+  const spacedPassword = "  owner-password-value  ";
+  const spacedSecret = "  session-secret-value-at-least-32-characters  ";
+  const exact = loadConfig(baseEnv({ OWNER_PASSWORD: spacedPassword, SESSION_SECRET: spacedSecret }));
+  assert.equal(exact.ownerPassword, spacedPassword);
+  assert.equal(exact.sessionSecret, spacedSecret);
   const setup = loadConfig(baseEnv({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "  " }));
   assert.equal(setup.oauthConfigured, false);
   assert.equal(setup.clientId, "");

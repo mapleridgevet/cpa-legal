@@ -41,6 +41,15 @@ function required(env, name, problems) {
   return value.trim();
 }
 
+function requiredSecret(env, name, problems) {
+  const value = env[name];
+  if (typeof value !== "string" || value.trim() === "") {
+    problems.push(`${name} is missing`);
+    return "";
+  }
+  return value;
+}
+
 function hostnameOf(value, label, problems) {
   try {
     return new URL(value);
@@ -59,8 +68,8 @@ export function loadConfig(env) {
   const intuit = assessIntuitPair(env.QBO_CLIENT_ID, env.QBO_CLIENT_SECRET);
   if (!intuit.ok) problems.push(intuit.message);
   const redirectUri = required(env, "QBO_REDIRECT_URI", problems);
-  const ownerPassword = required(env, "OWNER_PASSWORD", problems);
-  const sessionSecret = required(env, "SESSION_SECRET", problems);
+  const ownerPassword = requiredSecret(env, "OWNER_PASSWORD", problems);
+  const sessionSecret = requiredSecret(env, "SESSION_SECRET", problems);
   const publicBaseUrl = required(env, "PUBLIC_BASE_URL", problems);
   const dataDirRaw = required(env, "DATA_DIR", problems);
   const scope = (env.QBO_SCOPE || "com.intuit.quickbooks.accounting").trim();

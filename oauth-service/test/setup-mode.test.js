@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
+import { loadConfig } from "../src/config.js";
 import { createLoginThrottle } from "../src/login-throttle.js";
 import { createFileStateStore, createFileTokenStore, createMemoryStateStore } from "../src/stores.js";
 
@@ -259,4 +260,115 @@ test("partial Intuit credentials are refused before the app listens", () => {
     config: setupConfig({ clientId: "client-id-value", clientSecret: "" }),
     fetchImpl: async () => { throw new Error("Intuit should not be called"); },
   }), /both be set or both be absent/);
+});
+
+test("browser sign-in keeps an exact password, including surrounding spaces", async () => {
+  const password = "  owner-password-value  ";
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-browser-login-"));
+  const loaded = loadConfig({
+    QBO_ENVIRONMENT: "production",
+    PUBLIC_BASE_URL: "https://mapleridgecpa.com",
+    QBO_REDIRECT_URI: "https://mapleridgecpa.com/callback",
+    BIND_HOST: "127.0.0.1",
+    PORT: "8787",
+    COOKIE_SECURE: "true",
+    DATA_DIR: dataDir,
+    OWNER_PASSWORD: password,
+    SESSION_SECRET: "  session-secret-value-at-least-32-characters  ",
+  });
+  assert.equal(loaded.ownerPassword, password);
+  assert.equal(loaded.oauthConfigured, false);
+  let calls = 0;
+  const app = createApp({
+    config: { ...loaded, dataDir },
+    stateStore: createMemoryStateStore(),
+    tokenStore: createFileTokenStore(path.join(dataDir, "qbo-tokens.json")),
+    fetchImpl: async () => {
+      calls += 1;
+      throw new Error("Intuit should not be called");
+    },
+  });
+  const server = await listen(app.handler);
+  const port = server.address().port;
+  try {
+    const home = await request(port, {
+      path: "/",
+      headers: { Accept: "text/html", "CF-Connecting-IP": "203.0.113.40" },
+    });
+    assert.equal(home.status, 200);
+    const action = home.body.match(/<form method="post" action="([^"]+)">/)[1];
+    const field = home.body.match(/<input name="([^"]+)" type="password"/)[1];
+    assert.equal(action, "/login");
+    assert.equal(field, "password");
+    const browserHeaders = {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      Accept: "text/html,application/xhtml+xml",
+      Origin: "https://mapleridgecpa.com",
+      Referer: "https://mapleridgecpa.com/",
+      "X-Forwarded-For": "203.0.113.40",
+      "CF-Connecting-IP": "203.0.113.40",
+    };
+    const framed = await request(port, {
+      method: "POST",
+      path: action,
+      headers: browserHeaders,
+      body: `${encodeURIComponent(field)}=${encodeURIComponent(password)}\r\n`,
+    });
+    assert.equal(framed.status, 303);
+    assert.equal(framed.headers.location, "/");
+    const cookie = cookiePair(framed.headers["set-cookie"]);
+    assert.match(cookie, /__Host-cpa_session=/);
+    const signedIn = await request(port, { path: framed.headers.location, headers: { Cookie: cookie } });
+    assert.equal(signedIn.status, 200);
+    assert.match(signedIn.body, /QuickBooks is not configured/);
+    assert.equal(signedIn.body.includes("Sign in required"), false);
+
+    const trimmed = await request(port, {
+      method: "POST",
+      path: "/login",
+      headers: browserHeaders,
+      body: `${field}=${encodeURIComponent(password.trim())}`,
+    });
+    assert.equal(trimmed.status, 401);
+    assert.equal(trimmed.body, "Sign in required");
+    assert.equal(trimmed.headers["set-cookie"], undefined);
+
+    const bad = await request(port, {
+      method: "POST",
+      path: "/login",
+      headers: browserHeaders,
+      body: `${field}=wrong-password-value`,
+    });
+    assert.equal(bad.status, 401);
+    assert.equal(bad.body, "Sign in required");
+    assert.equal(bad.headers.location, undefined);
+    assert.equal(bad.headers["set-cookie"], undefined);
+    const stillOut = await request(port, { path: "/" });
+    assert.match(stillOut.body, /<h1>Owner sign-in<\/h1>/);
+    assert.equal(calls, 0);
+    assert.equal(app.log.lines.join("\n").includes(password), false);
+
+    const boundary = "cpaBoundary123";
+    const multipart = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="${field}"`,
+      "",
+      password,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    const multi = await request(port, {
+      method: "POST",
+      path: "/login",
+      headers: {
+        ...browserHeaders,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      },
+      body: multipart,
+    });
+    assert.equal(multi.status, 303);
+    assert.match(cookiePair(multi.headers["set-cookie"]), /__Host-cpa_session=/);
+  } finally {
+    server.close();
+  }
 });

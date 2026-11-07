@@ -72,6 +72,35 @@ function redirect(res, location, extra = {}) {
   send(res, 303, { Location: location, "Content-Type": "text/plain; charset=utf-8", ...extra }, "Redirecting");
 }
 
+function parseUrlEncoded(body) {
+  const text = body.toString("utf8").replace(/(?:\r\n|\n|\r)+$/, "");
+  return new URLSearchParams(text);
+}
+
+function parseMultipart(body, contentType) {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(String(contentType));
+  if (!boundaryMatch) return null;
+  const boundary = boundaryMatch[1] || boundaryMatch[2];
+  if (!boundary || boundary.length > 70) return null;
+  const params = new URLSearchParams();
+  for (const rawPart of body.toString("utf8").split(`--${boundary}`)) {
+    let part = rawPart;
+    if (part.startsWith("\r\n")) part = part.slice(2);
+    else if (part.startsWith("\n")) part = part.slice(1);
+    if (part === "" || part.startsWith("--")) continue;
+    const crlf = part.indexOf("\r\n\r\n");
+    const lf = part.indexOf("\n\n");
+    const splitAt = crlf >= 0 ? crlf : lf;
+    if (splitAt < 0) continue;
+    const nameMatch = /name="([^"]*)"|name=([^;\s]+)/i.exec(part.slice(0, splitAt));
+    if (!nameMatch) continue;
+    let value = part.slice(splitAt + (crlf >= 0 ? 4 : 2));
+    value = value.replace(/\r\n$/, "").replace(/\n$/, "");
+    params.append(nameMatch[1] ?? nameMatch[2], value);
+  }
+  return params;
+}
+
 async function readForm(req) {
   const chunks = [];
   let size = 0;
@@ -80,12 +109,18 @@ async function readForm(req) {
     if (size > 4096) throw new Error("body_too_large");
     chunks.push(chunk);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+  const body = Buffer.concat(chunks);
+  const contentType = String(req.headers["content-type"] || "");
+  if (/multipart\/form-data/i.test(contentType)) {
+    const parsed = parseMultipart(body, contentType);
+    if (parsed) return parsed;
+  }
+  return parseUrlEncoded(body);
 }
 
 function passwordsMatch(input, expected) {
-  const a = crypto.createHash("sha256").update(String(input), "utf8").digest();
-  const b = crypto.createHash("sha256").update(String(expected), "utf8").digest();
+  const a = crypto.createHash("sha256").update(String(input).normalize("NFC"), "utf8").digest();
+  const b = crypto.createHash("sha256").update(String(expected).normalize("NFC"), "utf8").digest();
   return crypto.timingSafeEqual(a, b);
 }
 
