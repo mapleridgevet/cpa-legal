@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Privacy Policy — CPA | Maple Ridge Mobile Veterinary Services, PLLC</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <span class="eyebrow">CPA · Privacy</span>
+      <h1>Privacy Policy</h1>
+      <p class="meta">
+        Maple Ridge Mobile Veterinary Services, PLLC (“Company,” “we,” “us,” or “our”)<br />
+        Application: <strong>CPA</strong> (internal accounting tool)<br />
+        Effective date: November 6, 2026<br />
+        Contact: <a href="mailto:info@mapleridgemobilevet.com">info@mapleridgemobilevet.com</a>
+      </p>
+    </header>
+
+    <nav class="toc" aria-label="Table of contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#scope">Scope and audience</a></li>
+        <li><a href="#overview">What CPA is</a></li>
+        <li><a href="#hosting">Where CPA runs (local vs public pages)</a></li>
+        <li><a href="#data">Categories of data</a></li>
+        <li><a href="#sources">How data is obtained</a></li>
+        <li><a href="#use">How data is used</a></li>
+        <li><a href="#credentials">Credentials and token handling</a></li>
+        <li><a href="#processors">Grok Bot, Cursor, and other services</a></li>
+        <li><a href="#sharing">Sharing, sale, and advertising</a></li>
+        <li><a href="#retention">Retention and deletion</a></li>
+        <li><a href="#security">Security measures (qualified)</a></li>
+        <li><a href="#rights">Privacy requests and revocation</a></li>
+        <li><a href="#children">Children</a></li>
+        <li><a href="#law">Applicable privacy law notes</a></li>
+        <li><a href="#changes">Changes</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ol>
+    </nav>
+
+    <main class="card">
+      <section id="scope">
+        <h2>1. Scope and audience</h2>
+        <p>
+          This Privacy Policy describes how the Company handles information in connection with
+          <strong>CPA</strong>, a private internal accounting tool that helps an authorized Owner retrieve QuickBooks Online
+          financial/accounting information and approve proposed bookkeeping entries with assistance from
+          <strong>Grok Bot</strong> (through the Cursor / Grok Bot service).
+        </p>
+        <p>
+          CPA is intended for <strong>authorized internal business use</strong> by the Company on devices the Company controls
+          (for example, an authorized phone or laptop) in a QuickBooks Online–licensed environment. It is
+          <strong>not</strong> marketed to the general public, is not intended as a consumer app store product, and is not
+          designed for advertising or lead generation.
+        </p>
+        <p>
+          This Policy applies to the Company’s operation of CPA and to these public legal pages. It does not replace Intuit’s,
+          Cursor’s, Grok Bot’s, email providers’, or other third parties’ own privacy terms for their platforms.
+        </p>
+      </section>
+
+      <section id="overview">
+        <h2>2. What CPA is</h2>
+        <p>CPA is designed to:</p>
+        <ul>
+          <li>Connect an authorized Owner’s QuickBooks Online company to Grok Bot using a local connector process;</li>
+          <li>Retrieve accounting-related data needed for bookkeeping review (for example, account lists, expenses, vendors, and card/purchase-related transactions available through the QuickBooks Online API);</li>
+          <li>Allow review of receipt-related email content the Owner makes available for expense categorization;</li>
+          <li>Propose bookkeeping entries for human review; and</li>
+          <li>Create or change QuickBooks Online entries <strong>only after the authorized user approves</strong> them.</li>
+        </ul>
+        <p>
+          CPA is <strong>not</strong> intended as a system of record for veterinary patient charts, clinical notes, regulated
+          animal-health records, payroll tax filings, or consumer marketing profiles. QuickBooks Online and email systems remain
+          the underlying systems of record for accounting and message data they store.
+        </p>
+      </section>
+
+      <section id="hosting">
+        <h2>3. Where CPA runs (local vs public pages)</h2>
+        <p>
+          <strong>Current development status:</strong> The CPA application and QuickBooks connector are hosted and run
+          <strong>locally on the Owner’s computer</strong> (a local process / MCP-style connector), not as a publicly hosted
+          multi-tenant accounting website operated by the Company.
+        </p>
+        <p>
+          <strong>OAuth redirect configuration:</strong> The connector’s configured redirect URI for interactive authorization
+          uses a <strong>localhost</strong> callback (for example, <code>http://localhost:8000/callback</code>) during local
+          development / sandbox-style setup. The Company does <strong>not</strong> intend to operate a publicly hosted CPA
+          connector that serves QuickBooks data to the open internet.
+        </p>
+        <div class="note">
+          <p>
+            <strong>Accuracy note for Intuit production apps:</strong> Intuit’s developer requirements for
+            <em>production</em> QuickBooks Online apps may require a publicly reachable HTTPS redirect URI for the
+            <em>initial</em> OAuth authorization handshake even when day-to-day API use continues from a local connector after
+            tokens are obtained. Any production authorization arrangement must follow Intuit’s then-current requirements.
+            That temporary callback need (if required) is not the same as publishing CPA or QuickBooks credentials as a public
+            service. Sandbox/development commonly allows localhost redirects; production rules may differ.
+          </p>
+        </div>
+        <p>
+          <strong>These legal pages:</strong> If published on GitHub Pages, only the static legal HTML/CSS files are intended
+          to be public. This legal site does not include application logs, analytics scripts, advertising pixels, or QuickBooks
+          data.
+        </p>
+      </section>
+
+      <section id="data">
+        <h2>4. Categories of data</h2>
+        <p>Depending on how the Owner uses CPA, the following categories may be processed:</p>
+        <h3>4.1 QuickBooks Online accounting data</h3>
+        <p>Retrieved through the QuickBooks Online API using the Company’s authorized connection, which may include:</p>
+        <ul>
+          <li>Chart of accounts / account lists and related metadata;</li>
+          <li>Expense, bill, purchase, vendor, and related transaction information;</li>
+          <li>Card / purchase activity reflected in QuickBooks Online;</li>
+          <li>Vendors and payees;</li>
+          <li>Company information and other accounting objects the connected app permissions allow; and</li>
+          <li>Entries created, updated, or voided only after user approval when write tools are enabled and used.</li>
+        </ul>
+        <p>
+          The underlying connector library can expose a broad QuickBooks Online tool surface (read/search and optional
+          create/update/delete categories). Company practice for CPA is to use the connection for internal bookkeeping review
+          and to require user approval before writing entries. Broader entity types that may exist in the library (for example,
+          customers, invoices, or employees) are not the intended focus of CPA’s expense-review workflow and should not be
+          treated as a promise that CPA is a payroll, tax-preparation, CRM, or clinical records product.
+        </p>
+
+        <h3>4.2 Receipt and email content</h3>
+        <p>
+          When the Owner uses CPA with receipt emails, message content, attachments, merchant names, amounts, dates, and
+          related expense clues may be reviewed to propose categorizations. Email remains stored with the Owner’s email
+          provider unless the Owner separately saves copies elsewhere.
+        </p>
+
+        <h3>4.3 Operational / conversation content with Grok Bot</h3>
+        <p>
+          Prompts, tool results, approvals, and related operational content may be processed by the Grok Bot / Cursor service
+          so the assistant can help retrieve data and draft proposed entries. That processing is subject to those services’
+          terms and privacy practices.
+        </p>
+
+        <h3>4.4 Authentication secrets</h3>
+        <p>
+          QuickBooks Online OAuth client credentials, access tokens, refresh tokens, and realm/company identifiers are used to
+          call Intuit APIs. See <a href="#credentials">Credentials and token handling</a>.
+        </p>
+
+        <h3>4.5 Data we do not intentionally collect via these legal pages</h3>
+        <p>
+          The static GitHub Pages legal site is not designed to collect visitor accounts, payment cards, precise geolocation,
+          advertising identifiers, or analytics profiles.
+        </p>
+      </section>
+
+      <section id="sources">
+        <h2>5. How data is obtained</h2>
+        <ul>
+          <li><strong>QuickBooks Online API</strong> over HTTPS to Intuit endpoints (sandbox or production, depending on configuration), after OAuth 2.0 authorization;</li>
+          <li><strong>Email / receipt sources</strong> the Owner chooses to open or provide for review;</li>
+          <li><strong>User input</strong> in Grok Bot / Cursor conversations (approvals, corrections, instructions); and</li>
+          <li><strong>Local configuration</strong> on the Owner’s device (for example, environment variables or a local token store file used by the connector).</li>
+        </ul>
+      </section>
+
+      <section id="use">
+        <h2>6. How data is used</h2>
+        <p>We use the information described above to:</p>
+        <ul>
+          <li>Help the authorized Owner review expenses and related accounting activity;</li>
+          <li>Propose bookkeeping categorizations and entries for human approval;</li>
+          <li>Create or update QuickBooks Online records only after approval;</li>
+          <li>Maintain the QuickBooks Online connection (including token refresh); and</li>
+          <li>Respond to privacy or access-control requests related to CPA.</li>
+        </ul>
+        <p>We do not use CPA data to sell advertising or to build third-party marketing profiles.</p>
+      </section>
+
+      <section id="credentials">
+        <h2>7. Credentials and token handling</h2>
+        <p>
+          Intuit / QuickBooks Online credentials and OAuth tokens for CPA are intended to be handled in a
+          <strong>secure local environment</strong> on authorized Company devices. In the current connector design:
+        </p>
+        <ul>
+          <li>Client ID, client secret, refresh token, and realm ID are read from a local configuration / token store (commonly a local <code>.env</code> file or an absolute path configured for token storage);</li>
+          <li>Token refresh is performed using the Intuit OAuth library (<code>intuit-oauth</code>), which obtains new access tokens and may rotate refresh tokens;</li>
+          <li>Rotated tokens are written back to the local token store by the connector process; and</li>
+          <li>The Company does <strong>not</strong> operate a separate permanent external database of QuickBooks secrets for CPA apart from the platforms the Owner already uses (QuickBooks Online / Intuit, email, and the Grok Bot / Cursor service environment).</li>
+        </ul>
+        <p>
+          Access to those devices and secrets should be limited to authorized users. Compromised device access can expose local
+          tokens; revoke the QuickBooks connection promptly if a device is lost or credentials may be exposed.
+        </p>
+      </section>
+
+      <section id="processors">
+        <h2>8. Grok Bot, Cursor, and other services</h2>
+        <p>
+          CPA relies on third-party services. Those providers may process operational and content data (including prompts,
+          tool outputs, and related metadata) according to their terms, privacy policies, and subprocessors:
+        </p>
+        <ul>
+          <li><strong>Intuit / QuickBooks Online</strong> — accounting system of record and API platform;</li>
+          <li><strong>Grok Bot / Cursor service</strong> — assistant runtime that may process conversation and tool data needed to operate CPA;</li>
+          <li><strong>Email provider(s)</strong> — if receipt emails are reviewed; and</li>
+          <li><strong>GitHub Pages</strong> — optional public hosting for these static legal pages only.</li>
+        </ul>
+        <p>
+          The Company does not control every subprocessors list or retention default of those providers. Review their current
+          documentation for details. Encryption, access controls, and retention on those platforms are
+          <strong>subject to each provider’s capabilities and policies</strong>; this Policy does not claim absolute,
+          Company-controlled encryption of all copies everywhere those services store data.
+        </p>
+      </section>
+
+      <section id="sharing">
+        <h2>9. Sharing, sale, and advertising</h2>
+        <ul>
+          <li>We do <strong>not</strong> sell CPA-related personal or accounting data.</li>
+          <li>We do <strong>not</strong> use third-party advertising tracking pixels or ad networks on these legal pages.</li>
+          <li>We share data with service providers only as needed to operate CPA (Intuit, Grok Bot / Cursor, email, and similar infrastructure the Owner configures).</li>
+          <li>We may disclose information if required by law, legal process, or to protect rights, safety, and security.</li>
+        </ul>
+      </section>
+
+      <section id="retention">
+        <h2>10. Retention and deletion</h2>
+        <p>Retention depends on the system that holds the data:</p>
+        <ul>
+          <li><strong>QuickBooks Online</strong> — retained according to Intuit / Company QuickBooks settings and accounting needs;</li>
+          <li><strong>Source email</strong> — retained according to the email provider and the Owner’s mailbox practices;</li>
+          <li><strong>Grok Bot / Cursor service</strong> — retained according to that service’s retention practices;</li>
+          <li><strong>Local token store / device files</strong> — retained on the Owner’s device until deleted, rotated, or revoked; and</li>
+          <li><strong>User requests</strong> — we will consider deletion or restriction requests regarding Company-controlled CPA materials, subject to legitimate legal, security, audit, tax, and backup needs.</li>
+        </ul>
+        <p>
+          We do <strong>not</strong> make unsupported promises of instantaneous or absolute deletion of every copy across
+          third-party platforms, backups, or legally required records.
+        </p>
+      </section>
+
+      <section id="security">
+        <h2>11. Security measures (qualified)</h2>
+        <p>Reasonable safeguards the Company intends to use include:</p>
+        <ul>
+          <li>Limiting CPA and QuickBooks credential access to authorized Owner devices;</li>
+          <li>Keeping the connector local rather than publishing it as an open accounting API;</li>
+          <li>Using OAuth 2.0 tokens instead of embedding user passwords in CPA; and</li>
+          <li>Relying on HTTPS for QuickBooks Online API calls as provided by Intuit’s endpoints.</li>
+        </ul>
+        <p>
+          No method of electronic storage or transmission is perfectly secure. Provider-side encryption and controls apply
+          only to the extent those providers implement them.
+        </p>
+      </section>
+
+      <section id="rights">
+        <h2>12. Privacy requests and revocation</h2>
+        <h3>Revoking QuickBooks access</h3>
+        <ul>
+          <li>Disconnect / revoke the app in Intuit’s connected apps / QuickBooks Online company authorization settings; and/or</li>
+          <li>Remove local CPA connector credentials/token files and stop running the local connector on Company devices (GitHub Pages legal hosting is independent of QuickBooks access control).</li>
+        </ul>
+        <h3>Privacy or data requests</h3>
+        <p>
+          Email <a href="mailto:info@mapleridgemobilevet.com">info@mapleridgemobilevet.com</a> with “CPA Privacy Request” in
+          the subject line. We may need to verify that the requester is an authorized Company contact. Responses may be limited
+          for data held only by Intuit, email providers, or the Grok Bot / Cursor service; we can help identify where to direct
+          those platform requests when appropriate.
+        </p>
+      </section>
+
+      <section id="children">
+        <h2>13. Children</h2>
+        <p>
+          CPA is a business internal tool and is not directed to children. We do not knowingly collect personal information
+          from children through CPA or these legal pages.
+        </p>
+      </section>
+
+      <section id="law">
+        <h2>14. Applicable privacy law notes</h2>
+        <p>
+          The Company is based in the United States (North Carolina). Depending on the circumstances, generally applicable
+          U.S. privacy and consumer-protection principles may inform how we handle requests. Because CPA is an internal
+          business tool and these pages are not intended as a public consumer product or marketing service, many consumer-app
+          notice frameworks may apply differently—or not at all—than they would to a broadly offered consumer website.
+        </p>
+        <p>
+          North Carolina consumers or business contacts may contact us at the email below with privacy questions related to
+          CPA. This section is informational and is <strong>not</strong> a comprehensive statement of every jurisdiction’s
+          requirements.
+        </p>
+      </section>
+
+      <section id="changes">
+        <h2>15. Changes</h2>
+        <p>
+          We may update this Privacy Policy as CPA’s architecture, hosting, or legal requirements change. The date at the top
+          will be revised when an updated version is approved. Material changes should be reviewed by the Owner before
+          publication or Intuit submission.
+        </p>
+      </section>
+
+      <section id="contact">
+        <h2>16. Contact</h2>
+        <p>
+          Maple Ridge Mobile Veterinary Services, PLLC<br />
+          Email: <a href="mailto:info@mapleridgemobilevet.com">info@mapleridgemobilevet.com</a>
+        </p>
+        <p class="note">
+          This document is not legal advice and does not create an attorney-client
+          relationship.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site">
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="eula.html">EULA</a>
+        <a href="mailto:info@mapleridgemobilevet.com">Contact</a>
+      </nav>
+      <p>© 2026 Maple Ridge Mobile Veterinary Services, PLLC. Not legal advice.</p>
+    </footer>
+  </div>
+</body>
+</html>
