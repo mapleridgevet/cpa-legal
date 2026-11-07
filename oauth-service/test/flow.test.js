@@ -4,6 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { assertOwnerOnlyFile } from "../src/acl.js";
 import { createApp } from "../src/app.js";
 import { createFileTokenStore, createMemoryStateStore } from "../src/stores.js";
 
@@ -243,8 +244,7 @@ test("accepted revoke removes the token file and a wrong csrf does not", async (
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-revoke-ok-"));
   const tokenStore = createFileTokenStore(path.join(dir, "tokens.json"));
   tokenStore.save({ accessToken: ACCESS_TOKEN, refreshToken: REFRESH_TOKEN });
-  const mode = fs.statSync(tokenStore.filePath).mode & 0o777;
-  assert.equal(mode, 0o600);
+  assertOwnerOnlyFile(tokenStore.filePath);
   const app = createApp({
     config: testConfig(),
     stateStore: createMemoryStateStore(),

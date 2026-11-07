@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { assertOwnerOnlyFile } from "../src/acl.js";
 import { createFileStateStore, sha256 } from "../src/stores.js";
 
 test("file-backed state is single-use across a reload", () => {
@@ -17,5 +18,5 @@ test("file-backed state is single-use across a reload", () => {
   assert.deepEqual(reloaded.consume(state, "owner-a", 4_000), { ok: true });
   const again = createFileStateStore(filePath);
   assert.deepEqual(again.consume(state, "owner-a", 4_000), { ok: false, reason: "reused" });
-  assert.equal((fs.statSync(filePath).mode & 0o777), 0o600);
+  assertOwnerOnlyFile(filePath);
 });

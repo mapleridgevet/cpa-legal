@@ -21,14 +21,31 @@ function Assert-NotConnector {
 
 function Protect-OwnerOnly {
   param([string]$Target)
+  $user = $env:USERNAME
   $item = Get-Item -LiteralPath $Target
   if ($item.PSIsContainer) {
-    & icacls $Target /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+      $user,
+      [System.Security.AccessControl.FileSystemRights]::FullControl,
+      [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit",
+      [System.Security.AccessControl.PropagationFlags]::None,
+      [System.Security.AccessControl.AccessControlType]::Allow
+    )
   } else {
-    & icacls $Target /inheritance:r /grant:r "${env:USERNAME}:(F)" | Out-Null
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+      $user,
+      [System.Security.AccessControl.FileSystemRights]::FullControl,
+      [System.Security.AccessControl.AccessControlType]::Allow
+    )
   }
-  if ($LASTEXITCODE -ne 0) {
-    throw "Could not restrict the Windows ACL. Nothing was started."
+  $acl.SetAccessRuleProtection($true, $false)
+  $acl.SetAccessRule($rule)
+  Set-Acl -LiteralPath $Target -AclObject $acl
+  $check = Get-Acl -LiteralPath $Target
+  if (-not $check.AreAccessRulesProtected -or @($check.Access).Count -ne 1) {
+    throw "ACL on $Target is not limited to $user. Nothing was started."
   }
 }
 
@@ -84,8 +101,17 @@ $publicConfig = [ordered]@{
   QBO_SCOPE = "com.intuit.quickbooks.accounting"
 }
 $configPath = Join-Path $DataDir "service-config.json"
-$publicConfig | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
-Protect-OwnerOnly $configPath
+foreach ($kept in @("secrets.clixml", "qbo-tokens.json", "oauth-state.json")) {
+  if (Test-Path -LiteralPath (Join-Path $DataDir $kept)) {
+    Write-Host "Left existing $kept in place."
+  }
+}
+if (Test-Path -LiteralPath $configPath) {
+  Write-Host "Left existing service-config.json in place."
+} else {
+  $publicConfig | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8
+  Protect-OwnerOnly $configPath
+}
 
 if ($ConfigureSecrets) {
   $bag = [ordered]@{
