@@ -71,12 +71,13 @@ export function decodePowerShellStdout(stdout) {
   return buffer.toString("utf8").replace(/^\uFEFF/, "");
 }
 
-function runPowerShell(script, target, user) {
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "-"], {
+function runPowerShell(script, target, user, options = {}) {
+  const command = options.command || "powershell.exe";
+  const args = options.args || ["-NoProfile", "-NonInteractive", "-Command", "-"];
+  const result = spawnSync(command, args, {
     input: script,
-    encoding: "buffer",
     windowsHide: true,
-    env: { ...process.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },
+    env: { ...process.env, ...options.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },
   });
   if (!result) return result;
   return { ...result, stdout: decodePowerShellStdout(result.stdout), stderr: decodePowerShellStdout(result.stderr) };
@@ -117,12 +118,12 @@ export function evaluateWindowsAclReport(stdout) {
 }
 
 function applyAndVerifyWindowsAcl(target, user, options) {
-  const apply = options.apply || ((script, pathName, account) => runPowerShell(script, pathName, account));
+  const apply = options.apply || ((script, pathName, account) => runPowerShell(script, pathName, account, options));
   const applied = apply(WINDOWS_ACL_APPLY_SCRIPT, target, user);
   if (!applied || applied.status !== 0) {
     throw new Error("Refusing to store tokens: Windows ACL could not be restricted");
   }
-  const read = options.read || ((script, pathName, account) => runPowerShell(script, pathName, account));
+  const read = options.read || ((script, pathName, account) => runPowerShell(script, pathName, account, options));
   const report = read(WINDOWS_ACL_READ_SCRIPT, target, user);
   if (!report || report.status !== 0) {
     throw new Error("Refusing to store tokens: Windows ACL could not be read back");

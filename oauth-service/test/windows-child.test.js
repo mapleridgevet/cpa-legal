@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { restrictPrivate, saveRestricted } from "../src/acl.js";
+
+const FAKE_POWERSHELL = `
+const fs = require("node:fs");
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("end", () => {
+  const script = Buffer.concat(chunks).toString("utf8");
+  const mode = process.env.FAKE_PS_MODE || "utf8";
+  if (mode === "fail-apply" && script.includes("SetAccessControl")) process.exit(2);
+  if (script.includes("SetAccessControl")) process.exit(0);
+  if (mode === "read-fail") process.exit(3);
+  const report = process.env.FAKE_PS_REPORT || "";
+  const body = mode === "utf16"
+    ? Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(report, "utf16le")])
+    : Buffer.from(report, "utf8");
+  fs.writeSync(1, body);
+  process.exit(0);
+});
+`;
+
+const goodReport = [
+  "CURRENT|S-1-5-21-1590306728-1194262839-348735189-1001",
+  "CURRENTNAME|NATESPC\\naesm",
+  "PROTECTED|True",
+  "ACCESSCOUNT|1",
+  "ACE|S-1-5-21-1590306728-1194262839-348735189-1001|NATESPC\\naesm|FullControl|False|Allow",
+].join("\n");
+
+function childOptions(mode, report = goodReport) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-fake-ps-"));
+  const fixture = path.join(dir, "fake-powershell.cjs");
+  fs.writeFileSync(fixture, FAKE_POWERSHELL);
+  return {
+    platform: "win32",
+    user: "naesm",
+    command: process.execPath,
+    args: [fixture],
+    env: { FAKE_PS_MODE: mode, FAKE_PS_REPORT: report },
+  };
+}
+
+test("the Windows child-process path accepts UTF-8 and UTF-16 reports", () => {
+  assert.doesNotThrow(() => restrictPrivate("C:\\data", { ...childOptions("utf8"), directory: true }));
+  assert.doesNotThrow(() => restrictPrivate("C:\\data", { ...childOptions("utf16"), directory: true }));
+});
+
+test("the Windows child-process path stays fail-closed for empty and failed reports", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-child-"));
+  const filePath = path.join(dir, "qbo-tokens.json");
+  assert.throws(() => saveRestricted(filePath, "{\"refreshToken\":\"hidden\"}", childOptions(
+    "utf8",
+    "CURRENT|S-1\nCURRENTNAME|NATESPC\\naesm\nPROTECTED|True\nACCESSCOUNT|0\n",
+  )), /not owner-only/);
+  assert.equal(fs.existsSync(filePath), false);
+  assert.throws(() => restrictPrivate("C:\\data", childOptions("fail-apply")), /could not be restricted/);
+  assert.throws(() => restrictPrivate("C:\\data", childOptions("read-fail")), /could not be read back/);
+});
+
+test("packaged Windows launcher does not pass an invalid spawn encoding", () => {
+  const source = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "acl.js"), "utf8");
+  assert.equal(source.includes("encoding: \"buffer\"") || source.includes("encoding: 'buffer'"), false);
+  assert.match(source, /spawnSync\(/);
+});
