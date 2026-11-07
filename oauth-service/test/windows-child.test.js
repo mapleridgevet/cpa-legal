@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { restrictPrivate, saveRestricted } from "../src/acl.js";
+import { WINDOWS_ACL_INDEX_READ_SCRIPT, restrictPrivate, saveRestricted } from "../src/acl.js";
+import { diagnoseDirectory } from "../src/acl-diagnostic.js";
 
 const FAKE_POWERSHELL = `
 const fs = require("node:fs");
@@ -13,6 +14,10 @@ process.stdin.on("data", (chunk) => chunks.push(chunk));
 process.stdin.on("end", () => {
   const script = Buffer.concat(chunks).toString("utf8");
   const mode = process.env.FAKE_PS_MODE || "utf8";
+  if (script.includes("B_COUNT")) {
+    fs.writeSync(1, "B_PROTECTED|True\\nB_COUNT|1\\nB_ACCOUNT|0|NATESPC\\\\naesm\\nB_RIGHTS|0|FullControl\\nB_INHERITED|0|False\\nB_TYPE|0|Allow\\nB_DONE\\n");
+    process.exit(0);
+  }
   if (mode === "fail-apply" && script.includes("SetAccessControl")) process.exit(2);
   if (script.includes("SetAccessControl")) process.exit(0);
   if (mode === "read-fail") process.exit(3);
@@ -61,6 +66,32 @@ test("the Windows child-process path stays fail-closed for empty and failed repo
   assert.equal(fs.existsSync(filePath), false);
   assert.throws(() => restrictPrivate("C:\\data", childOptions("fail-apply")), /could not be restricted/);
   assert.throws(() => restrictPrivate("C:\\data", childOptions("read-fail")), /could not be read back/);
+});
+
+test("the same child path preserves a count-without-ACE report for diagnosis", () => {
+  const partial = "CURRENT|S-1-5-21-1590306728-1194262839-348735189-1001\nCURRENTNAME|NATESPC\\naesm\nPROTECTED|True\nACCESSCOUNT|1\n";
+  let seen = "";
+  assert.throws(() => restrictPrivate("C:\\data", {
+    ...childOptions("utf8", partial),
+    apply(script) {
+      seen = script;
+      return { status: 0, stdout: "" };
+    },
+  }), /not owner-only/);
+  assert.match(seen, /SetAccessControl/);
+});
+
+test("directory diagnostic uses the child process and does not change the ACL", () => {
+  const output = diagnoseDirectory("C:\\Users\\naesm\\AppData\\Local\\MapleRidge\\cpa-oauth", childOptions(
+    "utf8",
+    "CURRENT|S-1-5-21-1590306728-1194262839-348735189-1001\nCURRENTNAME|NATESPC\\naesm\nPROTECTED|True\nACCESSCOUNT|1\n",
+  ));
+  assert.match(output, /BEGIN\|installer-read/);
+  assert.match(output, /ACCESSCOUNT\|1/);
+  assert.match(output, /found 0/);
+  assert.match(output, /BEGIN\|index-read/);
+  assert.match(output, /B_ACCOUNT\|0\|NATESPC\\\\naesm/);
+  assert.equal(WINDOWS_ACL_INDEX_READ_SCRIPT.includes("SetAccessControl"), false);
 });
 
 test("packaged Windows launcher does not pass an invalid spawn encoding", () => {

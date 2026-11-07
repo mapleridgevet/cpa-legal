@@ -64,6 +64,25 @@ foreach ($ace in $entries) {
 }
 `.trim();
 
+export const WINDOWS_ACL_INDEX_READ_SCRIPT = `
+$ErrorActionPreference = 'Continue'
+$path = $env:CPA_ACL_PATH
+$item = Get-Item -LiteralPath $path -Force
+$sections = [System.Security.AccessControl.AccessControlSections]::Access
+$acl = $item.GetAccessControl($sections)
+$entries = @($acl.Access)
+[Console]::Out.WriteLine('B_PROTECTED|' + $acl.AreAccessRulesProtected)
+[Console]::Out.WriteLine('B_COUNT|' + $entries.Count)
+for ($i = 0; $i -lt $entries.Count; $i++) {
+  $ace = $entries[$i]
+  [Console]::Out.WriteLine('B_ACCOUNT|' + $i + '|' + $ace.IdentityReference)
+  [Console]::Out.WriteLine('B_RIGHTS|' + $i + '|' + $ace.FileSystemRights)
+  [Console]::Out.WriteLine('B_INHERITED|' + $i + '|' + $ace.IsInherited)
+  [Console]::Out.WriteLine('B_TYPE|' + $i + '|' + $ace.AccessControlType)
+}
+[Console]::Out.WriteLine('B_DONE')
+`.trim();
+
 export function decodePowerShellStdout(stdout) {
   const buffer = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout ?? ""), "utf8");
   if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) return buffer.subarray(2).toString("utf16le");
@@ -80,7 +99,19 @@ function runPowerShell(script, target, user, options = {}) {
     env: { ...process.env, ...options.env, CPA_ACL_PATH: target, CPA_ACL_USER: user },
   });
   if (!result) return result;
-  return { ...result, stdout: decodePowerShellStdout(result.stdout), stderr: decodePowerShellStdout(result.stderr) };
+  const stdoutRaw = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || "");
+  const stderrRaw = Buffer.isBuffer(result.stderr) ? result.stderr : Buffer.from(result.stderr || "");
+  return {
+    ...result,
+    stdoutRaw,
+    stderrRaw,
+    stdout: decodePowerShellStdout(stdoutRaw),
+    stderr: decodePowerShellStdout(stderrRaw),
+  };
+}
+
+export function captureWindowsAclRead(target, script, options = {}) {
+  return runPowerShell(script, target, options.user || process.env.USERNAME || "", options);
 }
 
 export function evaluateWindowsAclReport(stdout) {
