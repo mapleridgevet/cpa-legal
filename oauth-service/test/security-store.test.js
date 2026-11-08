@@ -109,7 +109,7 @@ test("token encryption refuses plaintext and keeps the original when migration f
   assert.throws(() => createProtectedTokenStore(file, null).load(), /encryption key is missing|Refusing to read tokens/);
 });
 
-test("TRACE is not echoed and sensitive pages are not cached", async () => {
+test("TRACE is not echoed", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-trace-"));
   const app = createApp({
     config: appConfig(dir),
@@ -118,13 +118,32 @@ test("TRACE is not echoed and sensitive pages are not cached", async () => {
   });
   const server = await listen(app.handler);
   const port = server.address().port;
+  const secret = "password=owner-password-value-16";
   try {
-    const trace = await request(port, { method: "TRACE", path: "/login", body: "password=owner-password-value-16" });
+    const trace = await request(port, { method: "TRACE", path: "/login", body: secret });
     assert.equal(trace.status, 405);
     assert.equal(trace.body, "");
-    assert.equal(trace.body.includes("password"), false);
+    assert.equal(trace.body.includes(secret), false);
     assert.equal(trace.headers.allow, "GET, POST");
+    assert.match(trace.headers["cache-control"], /no-cache/);
+    assert.match(trace.headers["cache-control"], /no-store/);
+  } finally {
+    server.close();
+  }
+});
+
+test("sensitive pages are not cached", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-cache-"));
+  const app = createApp({
+    config: appConfig(dir),
+    stateStore: createMemoryStateStore(),
+    fetchImpl: async () => { throw new Error("Intuit should not be called"); },
+  });
+  const server = await listen(app.handler);
+  const port = server.address().port;
+  try {
     const home = await request(port, { path: "/" });
+    assert.equal(home.status, 200);
     assert.match(home.headers["cache-control"], /no-cache/);
     assert.match(home.headers["cache-control"], /no-store/);
   } finally {

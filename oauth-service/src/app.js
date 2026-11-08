@@ -124,12 +124,10 @@ function quickbooksState(oauthConfigured, tokenStore) {
 
 export function installServer(server) {
   server.on("clientError", (err, socket) => {
-    if (socket.destroyed || !socket.writable) return;
-    const started = Boolean(socket._httpMessage && socket._httpMessage.headersSent);
-    if (started) {
-      socket.end();
-      return;
-    }
+    if (socket.destroyed) return;
+    const started = Boolean(socket._httpMessage && socket._httpMessage.headersSent) || socket.bytesWritten > 0;
+    if (started) return;
+    if (!socket.writable) return;
     socket.end(
       "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, POST\r\nContent-Length: 0\r\nCache-Control: no-cache, no-store\r\nConnection: close\r\n\r\n",
     );
@@ -178,7 +176,11 @@ export function createApp(options) {
     const pathName = requestUrl.pathname;
     try {
       if (req.method === "TRACE" || req.method === "TRACK") {
-        send(res, 405, { Allow: "GET, POST", "Content-Type": "text/plain; charset=utf-8" }, "");
+        send(res, 405, {
+          Allow: "GET, POST",
+          "Content-Type": "text/plain; charset=utf-8",
+          Connection: "close",
+        }, "");
         return;
       }
       if (req.method === "GET" && pathName === "/health") {
