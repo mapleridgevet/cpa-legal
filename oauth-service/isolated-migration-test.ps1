@@ -57,24 +57,57 @@ function New-FakeSecrets {
   return $path
 }
 
-function Invoke-RealMigration {
-  param([string]$Dir)
-  Assert-IsolatedPath $Dir | Out-Null
+function Invoke-MigrationChild {
+  param([string]$Dir, [switch]$ResolveOnly)
+  $previousAction = $ErrorActionPreference
   $previous = $env:CPA_MIGRATION_ISOLATED
   $env:CPA_MIGRATION_ISOLATED = "1"
+  $ErrorActionPreference = "Continue"
   $output = ""
-  $code = 0
+  $code = 1
   try {
-    $output = (& powershell -NoProfile -ExecutionPolicy Bypass -File $Migrate -DataDir $Dir 2>&1 | Out-String)
-    $code = $LASTEXITCODE
+    $argumentList = "-NoProfile -ExecutionPolicy Bypass -File `"$Migrate`""
+    if (-not [string]::IsNullOrWhiteSpace($Dir)) { $argumentList += " -DataDir `"$Dir`"" }
+    if ($ResolveOnly) { $argumentList += " -ResolveOnly" }
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = "powershell.exe"
+    $start.Arguments = $argumentList
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.CreateNoWindow = $true
+    $start.StandardOutputEncoding = [System.Text.Encoding]::Unicode
+    $start.StandardErrorEncoding = [System.Text.Encoding]::Unicode
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $start
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $code = $process.ExitCode
+    $output = [string]$stdoutTask.Result + [string]$stderrTask.Result
   } finally {
+    $ErrorActionPreference = $previousAction
     if ($null -eq $previous) { Remove-Item Env:CPA_MIGRATION_ISOLATED -ErrorAction SilentlyContinue }
     else { $env:CPA_MIGRATION_ISOLATED = $previous }
   }
   foreach ($secret in @($FakePassword, $FakeSession, $FakeClientId, $FakeClientSecret, $FakeRefresh, $FakeAccess, $FakeRealm, "scrypt$")) {
     if ($output.Contains($secret)) { throw "Migration output contained secret material." }
   }
-  return @{ Code = $code }
+  $started = $output.Contains("MIGRATION_STARTED")
+  if ($ResolveOnly -and $started) { throw "Path check continued into migration." }
+  if (-not $ResolveOnly -and -not $started) { throw "Migration child did not start." }
+  return @{ Code = $code; Output = $output }
+}
+
+function Assert-ChildResolution {
+  param([string]$Dir)
+  $resolved = Invoke-MigrationChild -Dir $Dir -ResolveOnly
+  $expected = [System.IO.Path]::GetFullPath($Dir).TrimEnd("\")
+  $actual = $resolved.Output.Trim()
+  if ($resolved.Code -ne 0 -or -not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Migration child did not resolve inside the temp fixture."
+  }
 }
 
 $root = Assert-IsolatedPath $Root
@@ -97,9 +130,18 @@ foreach ($rel in @(
 $fixture = Join-Path $root ("fixture-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Path $fixture | Out-Null
 Assert-IsolatedPath $fixture | Out-Null
+Assert-ChildResolution $fixture
+$outside = Join-Path (Split-Path -Parent ([System.IO.Path]::GetFullPath($env:TEMP))) ("cpa-not-temp-" + [guid]::NewGuid().ToString("n"))
+$outsideRun = Invoke-MigrationChild -Dir $outside -ResolveOnly
+if ($outsideRun.Code -eq 0 -or $outsideRun.Output.Contains("MIGRATION_STARTED")) { throw "A path outside TEMP was accepted." }
+$liveRun = Invoke-MigrationChild -Dir $LiveData -ResolveOnly
+if ($liveRun.Code -eq 0 -or $liveRun.Output.Contains("MIGRATION_STARTED")) { throw "The live data folder was accepted." }
+$defaultRun = Invoke-MigrationChild -ResolveOnly
+if ($defaultRun.Code -eq 0 -or $defaultRun.Output.Contains("MIGRATION_STARTED")) { throw "The default live data folder was accepted." }
 Write-Host "ISOLATED|programUnderTemp|true"
 Write-Host "ISOLATED|dataUnderFixture|true"
 Write-Host "ISOLATED|livePaths|rejected"
+Write-Host "ISOLATED|childResolvedUnderFixture|true"
 
 $settings = '{"probe":"isolated"}'
 $settingsPath = Join-Path $fixture "service-config.json"
@@ -107,13 +149,15 @@ Set-Content -LiteralPath $settingsPath -Value $settings -Encoding utf8
 $settingsHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $settingsPath).Hash
 New-FakeSecrets -Dir $fixture -SessionText $FakeSession -IncludeIntuit | Out-Null
 $tokenPath = Join-Path $fixture "qbo-tokens.json"
-Set-Content -LiteralPath $tokenPath -Value (@{
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$tokenJson = @{
   accessToken = $FakeAccess
   refreshToken = $FakeRefresh
   realmId = $FakeRealm
-} | ConvertTo-Json) -Encoding utf8
+} | ConvertTo-Json -Compress
+[System.IO.File]::WriteAllText($tokenPath, $tokenJson, $utf8NoBom)
 
-$first = Invoke-RealMigration $fixture
+$first = Invoke-MigrationChild $fixture
 if ($first.Code -ne 0) { throw "First migration failed." }
 $loaded = Import-Clixml -LiteralPath (Join-Path $fixture "secrets.clixml")
 if ($loaded.OWNER_PASSWORD -is [System.Security.SecureString]) { throw "Reversible owner value remains." }
@@ -138,6 +182,11 @@ $trimmed = [string](& node (Join-Path $Here "src\owner-password-cli.js") verify)
 $trimmedCode = $LASTEXITCODE
 Remove-Item Env:OWNER_PASSWORD -ErrorAction SilentlyContinue
 Remove-Item Env:OWNER_PASSWORD_HASH -ErrorAction SilentlyContinue
+foreach ($report in @($exact, $trimmed)) {
+  foreach ($secret in @($FakePassword, $FakeSession, $FakeClientId, $FakeClientSecret, $FakeRefresh, $FakeAccess, $FakeRealm, "scrypt$")) {
+    if ($report.Contains($secret)) { throw "Password check output contained secret material." }
+  }
+}
 if ($exactCode -ne 0 -or $exact.Trim() -ne "match") { throw "Exact password did not verify." }
 if ($trimmedCode -eq 0 -or $trimmed.Trim() -eq "match") { throw "Trimmed password was accepted." }
 $env:TOKEN_ENC_KEY = $keyPlain
@@ -151,6 +200,9 @@ Remove-Item Env:CPA_EXPECT_REFRESH -ErrorAction SilentlyContinue
 Remove-Item Env:CPA_EXPECT_ACCESS -ErrorAction SilentlyContinue
 Remove-Item Env:CPA_EXPECT_REALM -ErrorAction SilentlyContinue
 $keyPlain = $null
+foreach ($secret in @($FakePassword, $FakeSession, $FakeClientId, $FakeClientSecret, $FakeRefresh, $FakeAccess, $FakeRealm, "scrypt$")) {
+  if ($tokenCheck.Contains($secret)) { throw "Token check output contained secret material." }
+}
 if ($tokenCheckCode -ne 0 -or $tokenCheck.Trim() -ne "match") { throw "Token decrypt failed." }
 if (@(Get-ChildItem -LiteralPath $fixture -Recurse -Force -Filter "*.bak" -ErrorAction SilentlyContinue).Count -ne 0) { throw "A backup file remains." }
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $settingsPath).Hash -ne $settingsHash) { throw "Settings file changed." }
@@ -164,7 +216,7 @@ Write-Host "ISOLATED|tokenDecrypt|true"
 Write-Host "ISOLATED|tokenPlaintextAbsent|true"
 Write-Host "ISOLATED|backupAbsent|true"
 
-$second = Invoke-RealMigration $fixture
+$second = Invoke-MigrationChild $fixture
 if ($second.Code -ne 0) { throw "Second migration failed." }
 $again = Import-Clixml -LiteralPath (Join-Path $fixture "secrets.clixml")
 if ($again.OWNER_PASSWORD -is [System.Security.SecureString]) { throw "Second run restored a reversible password." }
@@ -174,6 +226,7 @@ Write-Host "ISOLATED|secondRun|true"
 $shortDir = Join-Path $root ("short-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Path $shortDir | Out-Null
 Assert-IsolatedPath $shortDir | Out-Null
+Assert-ChildResolution $shortDir
 $shortBag = [ordered]@{
   OWNER_PASSWORD = (ConvertTo-SecureString $FakePassword -AsPlainText -Force)
   SESSION_SECRET = (ConvertTo-SecureString "too-short" -AsPlainText -Force)
@@ -181,7 +234,7 @@ $shortBag = [ordered]@{
 $shortPath = Join-Path $shortDir "secrets.clixml"
 $shortBag | Export-Clixml -LiteralPath $shortPath
 $before = (Get-FileHash -Algorithm SHA256 -LiteralPath $shortPath).Hash
-$shortRun = Invoke-RealMigration $shortDir
+$shortRun = Invoke-MigrationChild $shortDir
 $after = (Get-FileHash -Algorithm SHA256 -LiteralPath $shortPath).Hash
 if ($shortRun.Code -eq 0 -or $before -ne $after) { throw "Short session secret was not left unchanged." }
 Write-Host "ISOLATED|shortSessionUnchanged|true"
@@ -189,11 +242,12 @@ Write-Host "ISOLATED|shortSessionUnchanged|true"
 $badDir = Join-Path $root ("badtoken-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Path $badDir | Out-Null
 Assert-IsolatedPath $badDir | Out-Null
+Assert-ChildResolution $badDir
 New-FakeSecrets -Dir $badDir -SessionText $FakeSession | Out-Null
 $badToken = Join-Path $badDir "qbo-tokens.json"
-Set-Content -LiteralPath $badToken -Value "{" -Encoding utf8
+[System.IO.File]::WriteAllText($badToken, "{", $utf8NoBom)
 $badBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $badToken).Hash
-$badRun = Invoke-RealMigration $badDir
+$badRun = Invoke-MigrationChild $badDir
 $badAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $badToken).Hash
 if ($badRun.Code -eq 0 -or $badBefore -ne $badAfter) { throw "Invalid token file was not kept." }
 if (@(Get-ChildItem -LiteralPath $badDir -Recurse -Force -Filter "*.bak" -ErrorAction SilentlyContinue).Count -ne 0) { throw "Token failure left a backup." }

@@ -64,6 +64,10 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.match(migration, /\[string\]\$DataDir = "C:\\Users\\naesm\\AppData\\Local\\MapleRidge\\cpa-oauth"/);
   assert.match(migration, /CPA_MIGRATION_ISOLATED/);
   assert.match(migration, /Refusing isolated migration on a live CPA path/);
+  assert.ok(migration.indexOf("Write-Output \"MIGRATION_STARTED\"") < migration.indexOf("Import-Clixml"));
+  assert.ok(migration.indexOf("if ($ResolveOnly)") < migration.indexOf("Write-Output \"MIGRATION_STARTED\""));
+  assert.match(harness, /childResolvedUnderFixture/);
+  assert.match(harness, /-ResolveOnly/);
   assert.match(installer, /Move-Item -LiteralPath \$temp -Destination \$dest/);
   assert.match(installer, /check-intuit-credentials\.js/);
   const starter = fs.readFileSync(path.join(releaseRoot, "start-oauth-service.ps1"), "utf8");

@@ -4,7 +4,8 @@
 # With no -DataDir, the live data folder is used. Tests must pass -DataDir and set
 # CPA_MIGRATION_ISOLATED=1, which rejects that live folder.
 param(
-  [string]$DataDir = "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth"
+  [string]$DataDir = "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth",
+  [switch]$ResolveOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +34,12 @@ function Assert-MigrationPath {
 }
 
 $DataDir = Assert-MigrationPath $DataDir
+if ($ResolveOnly) {
+  if ($env:CPA_MIGRATION_ISOLATED -ne "1") { throw "ResolveOnly is only available for an isolated test." }
+  Write-Output $DataDir
+  exit 0
+}
+Write-Output "MIGRATION_STARTED"
 $SecretPath = Join-Path $DataDir "secrets.clixml"
 $TokenPath = Join-Path $DataDir "qbo-tokens.json"
 
