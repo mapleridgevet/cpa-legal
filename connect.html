@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Connect or reconnect QuickBooks — CPA | Maple Ridge Mobile Veterinary Services, PLLC</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <span class="eyebrow">CPA · Connect instructions</span>
+      <h1>Connect or reconnect QuickBooks</h1>
+      <p class="meta">
+        Maple Ridge Mobile Veterinary Services, PLLC (“Company”)<br />
+        Application: <strong>CPA</strong> (internal accounting tool)<br />
+        Contact: <a href="mailto:info@mapleridgemobilevet.com">info@mapleridgemobilevet.com</a>
+      </p>
+    </header>
+
+    <main class="card">
+      <div class="note">
+        <p>
+          <strong>This page does not connect or reconnect QuickBooks.</strong>
+          It is a static instruction page. Production authorization is not configured.
+          Opening this address does not sign anyone in, does not start OAuth, and does not show a success result.
+        </p>
+      </div>
+
+      <section>
+        <h2>Separate sign-in service</h2>
+        <p>
+          The program that can actually sign the Owner in, send the browser to Intuit, receive the authorization code,
+          and store tokens is <code>oauth-service</code> in the source repository. GitHub Pages does not run it, and
+          Intuit must not send the authorization code to <code>mapleridgevet.github.io</code>. That service is not deployed
+          and has no hostname yet. Until the Owner approves a hostname and starts it on the Company PC, this page cannot
+          hand you off to a live sign-in.
+        </p>
+      </section>
+
+      <section>
+        <h2>What this address is</h2>
+        <p>
+          Intuit’s app settings ask for a connect/reconnect URL: the page a customer opens when connecting or reconnecting the app.
+          This is that instruction page for CPA. It is not the OAuth redirect URI. Intuit’s OAuth server must send the authorization
+          code to a separate redirect URI that can exchange the code for tokens. This GitHub Pages file cannot do that exchange.
+        </p>
+        <p>
+          CPA is an internal tool for the authorized Owner on a Company-controlled computer. It is not a public sign-in website.
+          There is no web login on this site.
+        </p>
+      </section>
+
+      <section>
+        <h2>Current connection state</h2>
+        <ul>
+          <li>The connector in use is the <strong>sandbox / development</strong> setup on the authorized Company Windows PC.</li>
+          <li>That PC starts authorization with the local launcher <code>authorize-quickbooks.ps1</code> in the connector folder.</li>
+          <li>The sandbox callback stays on that PC. It is not a link on this website, and it is not a production redirect URI.</li>
+          <li>A production HTTPS redirect URI is <strong>not configured</strong>. This site does not publish an authorization endpoint.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Owner-only sandbox authorization</h2>
+        <p>Use these steps only on the Company Windows PC where the connector is already installed. Another computer cannot complete them.</p>
+        <ol>
+          <li>Sign in to the Company’s QuickBooks Online sandbox company in the browser on that PC, as the authorized Owner.</li>
+          <li>Open the connector folder on that PC and run <code>authorize-quickbooks.ps1</code>.</li>
+          <li>Use the QuickBooks consent screen that the launcher opens. Approve the connection only for the Company file you intend to connect.</li>
+          <li>Leave the authorization code, tokens, client secret, and company ID on that PC. Do not paste them into email, chat, or this website.</li>
+          <li>Stop if the launcher is missing, the consent screen does not appear, or the window reports an error. This page cannot repair that.</li>
+        </ol>
+        <p>
+          The Privacy Policy describes where that local process stores tokens:
+          <a href="privacy-policy.html#credentials">Credentials and token handling</a>
+          and
+          <a href="privacy-policy.html#hosting">where CPA runs</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Production reconnect is not available here</h2>
+        <p>
+          When a production connection exists, reconnecting means the Owner runs the local authorization flow again and Intuit returns
+          a new authorization code to the configured production redirect URI. That URI is not this page. Until a production HTTPS
+          redirect URI is registered and a process on the Company side can exchange the code for tokens, choose this page in Intuit’s
+          form only as the place a person is sent to read these instructions. It does not re-authenticate the app.
+        </p>
+        <p>
+          Refresh-token expiry notices inside QuickBooks may link to whatever reconnect URL is saved in the developer portal.
+          If this address is that URL, the notice will open these instructions. It will not renew tokens by itself.
+        </p>
+      </section>
+
+      <section>
+        <h2>Related pages</h2>
+        <div class="hero-links" aria-label="Related pages">
+          <a href="disconnect.html">
+            <strong>Disconnect instructions</strong>
+            <span>How to revoke the app in QuickBooks and remove the local token file. This site has no disconnect button.</span>
+          </a>
+          <a href="privacy-policy.html">
+            <strong>Privacy Policy</strong>
+            <span>Approved November 6, 2026 wording. These instructions do not change it.</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site">
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="eula.html">EULA</a>
+        <a href="connect.html">Connect</a>
+        <a href="disconnect.html">Disconnect</a>
+        <a href="mailto:info@mapleridgemobilevet.com">Contact</a>
+      </nav>
+      <p>© 2026 Maple Ridge Mobile Veterinary Services, PLLC. Not legal advice. This page does not connect QuickBooks.</p>
+    </footer>
+  </div>
+</body>
+</html>

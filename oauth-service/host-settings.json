@@ -1,0 +1,9 @@
+{
+  "publicBaseUrl": "https://mapleridgecpa.com",
+  "redirectUri": "https://mapleridgecpa.com/callback",
+  "bindHost": "127.0.0.1",
+  "port": 8787,
+  "environment": "production",
+  "tunnelName": "mapleridge-cpa",
+  "tunnelOrigin": "http://127.0.0.1:8787"
+}

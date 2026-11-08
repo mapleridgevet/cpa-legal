@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Disconnect QuickBooks — CPA | Maple Ridge Mobile Veterinary Services, PLLC</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="site">
+      <span class="eyebrow">CPA · Disconnect instructions</span>
+      <h1>Disconnect QuickBooks</h1>
+      <p class="meta">
+        Maple Ridge Mobile Veterinary Services, PLLC (“Company”)<br />
+        Application: <strong>CPA</strong> (internal accounting tool)<br />
+        Contact: <a href="mailto:info@mapleridgemobilevet.com">info@mapleridgemobilevet.com</a>
+      </p>
+    </header>
+
+    <main class="card">
+      <div class="note">
+        <p>
+          <strong>This page does not disconnect QuickBooks.</strong>
+          It is a static instruction page. There is no disconnect button here, and this site cannot revoke tokens.
+          If QuickBooks sent you to this address, the app is not disconnected until you finish the steps below.
+          Anything after a question mark in the address is ignored. This page does not read, display, or store a company ID.
+        </p>
+      </div>
+
+      <section>
+        <h2>What this address is</h2>
+        <p>
+          Intuit’s app settings ask for a disconnect URL: the page a person reaches after they disconnect the app from a
+          QuickBooks Online company. For an app that does not use Intuit single sign-on, Intuit’s current app-settings
+          documentation allows that destination to be a static page that tells the user they have disconnected, with steps
+          to reconnect if the disconnect was unintended.
+        </p>
+        <p>
+          This page is that static notice for CPA. It is not an OAuth redirect URI and it does not call Intuit’s token-revoke API.
+          Revoking tokens from the app’s side has to happen on the Company PC, where the tokens are stored.
+          The <code>oauth-service</code> program is the piece that can send Intuit’s revocation request after the Owner
+          signs in. It is not running on this GitHub Pages site, and this page still has no revoke button.
+        </p>
+      </section>
+
+      <section>
+        <h2>1. Disconnect the app inside QuickBooks Online</h2>
+        <p>
+          Sign in as a QuickBooks Online admin, or as the user who connected the app. Intuit’s current U.S. help says:
+        </p>
+        <ol>
+          <li>Go to <strong>Integrations</strong> and select <strong>Manage integrations</strong>.</li>
+          <li>Find CPA (or the app name shown in the Intuit developer portal).</li>
+          <li>Open the <strong>Action</strong> menu and select <strong>Disconnect</strong>. If that item is missing, open <strong>Settings</strong> for the app and use the Disconnect button there.</li>
+          <li>Complete Intuit’s short questionnaire and select <strong>Confirm Disconnect</strong>.</li>
+        </ol>
+        <p>
+          Menu labels can change. Use Intuit’s article
+          <a href="https://quickbooks.intuit.com/learn-support/en-us/help-article/accountant-access/disconnect-app-change-subscription/L5y72TDf3_US_en_US">Disconnect an app and change subscription in QuickBooks</a>
+          if the screen does not match these steps. QuickBooks may then send the browser to this page. Landing here is not itself the revocation.
+        </p>
+      </section>
+
+      <section>
+        <h2>2. Stop the local connector and remove its token file</h2>
+        <p>On the authorized Company Windows PC:</p>
+        <ol>
+          <li>Stop the local connector if it is still running. Closing the window that <code>authorize-quickbooks.ps1</code> opened is the start; also end any connector process that is still running on that PC.</li>
+          <li>Remove the local token store the connector uses. The <a href="privacy-policy.html#credentials">Privacy Policy</a> describes it as a local configuration or token file on that PC, not a database on this website.</li>
+          <li>Do not open the file and paste its contents into email, chat, or a browser. Do not send the client secret, refresh token, or company ID to anyone.</li>
+          <li>This website cannot see that file and cannot delete it for you.</li>
+        </ol>
+        <p>
+          Intuit’s OAuth documentation says that when a user disconnects, the app needs to revoke its access and refresh tokens
+          by calling Intuit’s revocation endpoint. The local connector is the only CPA component that can do that, and production
+          authorization is not configured. Deleting the local token file stops this PC from reusing a saved token. It does not
+          by itself prove that Intuit has revoked the grant. Do step 1 in QuickBooks as well.
+        </p>
+      </section>
+
+      <section>
+        <h2>If the disconnect was unintended</h2>
+        <p>
+          Reconnecting is not offered on this page. The Owner can read
+          <a href="connect.html">Connect or reconnect QuickBooks</a>.
+          That page explains the current sandbox launcher. It also states that a production reconnect cannot be completed from this website.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site">
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="eula.html">EULA</a>
+        <a href="connect.html">Connect</a>
+        <a href="disconnect.html">Disconnect</a>
+        <a href="mailto:info@mapleridgemobilevet.com">Contact</a>
+      </nav>
+      <p>© 2026 Maple Ridge Mobile Veterinary Services, PLLC. Not legal advice. This page does not disconnect QuickBooks.</p>
+    </footer>
+  </div>
+</body>
+</html>
