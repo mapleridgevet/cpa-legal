@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { isForbiddenDataDir, loadConfig } from "../src/config.js";
+import { hashOwnerPassword, verifyOwnerPassword } from "../src/password-hash.js";
 
 const serviceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -13,7 +14,7 @@ function baseEnv(overrides = {}) {
     QBO_CLIENT_SECRET: "client-secret-value",
     QBO_REDIRECT_URI: "https://mapleridgecpa.com/callback",
     QBO_ENVIRONMENT: "production",
-    OWNER_PASSWORD: "owner-password-value-16",
+    OWNER_PASSWORD_HASH: hashOwnerPassword("owner-password-value-16"),
     SESSION_SECRET: "session-secret-value-at-least-32-characters",
     PUBLIC_BASE_URL: "https://mapleridgecpa.com",
     DATA_DIR: "/tmp/cpa-oauth-outside-repo",
@@ -25,13 +26,15 @@ test("production configuration fails closed", () => {
   assert.throws(() => loadConfig(baseEnv({ QBO_CLIENT_SECRET: "" })), /both be set or both be absent/);
   assert.throws(() => loadConfig(baseEnv({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "client-secret-value" })), /both be set or both be absent/);
   assert.throws(() => loadConfig(baseEnv({ QBO_CLIENT_ID: "placeholder", QBO_CLIENT_SECRET: "client-secret-value" })), /must not be a placeholder/);
-  assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD: "" })), /OWNER_PASSWORD is missing/);
-  assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD: "   " })), /OWNER_PASSWORD is missing/);
+  assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD_HASH: "" })), /OWNER_PASSWORD_HASH is missing/);
+  assert.throws(() => loadConfig(baseEnv({ OWNER_PASSWORD: "owner-password-value-16" })), /reversible OWNER_PASSWORD is not accepted/);
   const spacedPassword = "  owner-password-value  ";
   const spacedSecret = "  session-secret-value-at-least-32-characters  ";
-  const exact = loadConfig(baseEnv({ OWNER_PASSWORD: spacedPassword, SESSION_SECRET: spacedSecret }));
-  assert.equal(exact.ownerPassword, spacedPassword);
+  const exact = loadConfig(baseEnv({ OWNER_PASSWORD_HASH: hashOwnerPassword(spacedPassword), SESSION_SECRET: spacedSecret }));
+  assert.equal(verifyOwnerPassword(spacedPassword, exact.ownerPasswordHash), true);
+  assert.equal(verifyOwnerPassword(spacedPassword.trim(), exact.ownerPasswordHash), false);
   assert.equal(exact.sessionSecret, spacedSecret);
+  assert.equal(exact.ownerPassword, undefined);
   const setup = loadConfig(baseEnv({ QBO_CLIENT_ID: "", QBO_CLIENT_SECRET: "  " }));
   assert.equal(setup.oauthConfigured, false);
   assert.equal(setup.clientId, "");

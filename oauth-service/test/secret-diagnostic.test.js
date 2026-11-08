@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { hashOwnerPassword } from "../src/password-hash.js";
 import { describeSecret, parseFormFields, sameSecret } from "../src/secret-diagnostic.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,6 +83,29 @@ test("a local compare reports only yes or no", async () => {
   const miss = await compare("different-password-value");
   assert.match(miss.stdout, /DIAG\|matchesOwner\|false/);
   assert.match(miss.stdout, /DIAG\|matchesSession\|false/);
+
+  const hash = hashOwnerPassword(owner);
+  const hashed = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script], {
+      env: {
+        ...process.env,
+        OWNER_PASSWORD_HASH: hash,
+        SESSION_SECRET: session,
+        CPA_DIAG_CANDIDATE: owner,
+        CPA_DIAG_MODE: "compare",
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  assert.equal(hashed.status, 0);
+  assert.match(hashed.stdout, /DIAG\|matchesOwner\|true/);
+  assert.equal((hashed.stdout + hashed.stderr).includes(hash), false);
+  assert.equal((hashed.stdout + hashed.stderr).includes(owner), false);
 });
 
 test("a framed browser body keeps the password exact", () => {

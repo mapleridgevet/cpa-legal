@@ -8,6 +8,7 @@ export const ROOT_FILES = [
   "host-settings.json",
   "install.ps1",
   "start-oauth-service.ps1",
+  "migrate-secrets.ps1",
   "README.md",
 ];
 
@@ -24,6 +25,10 @@ export const REQUIRED = [
   "src/login-throttle.js",
   "src/secret-policy.js",
   "src/check-intuit-credentials.js",
+  "src/password-hash.js",
+  "src/token-crypto.js",
+  "src/owner-password-cli.js",
+  "src/migrate-token-file.js",
   "test/state-file.test.js",
 ];
 

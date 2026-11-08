@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "./config.js";
+import { hashOwnerPassword } from "./password-hash.js";
 
 const settings = JSON.parse(fs.readFileSync(new URL("../host-settings.json", import.meta.url), "utf8"));
 const expected = {
@@ -27,7 +28,7 @@ function productionEnv(extra = {}) {
     PORT: String(settings.port),
     COOKIE_SECURE: "true",
     DATA_DIR: path.join(os.tmpdir(), "cpa-oauth-preflight"),
-    OWNER_PASSWORD: "preflight-owner-password",
+    OWNER_PASSWORD_HASH: hashOwnerPassword("preflight-owner-password"),
     SESSION_SECRET: "preflight-session-secret-32chars-min",
     ...extra,
   };

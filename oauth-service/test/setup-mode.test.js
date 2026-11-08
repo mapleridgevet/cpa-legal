@@ -6,10 +6,12 @@ import path from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
+import { hashOwnerPassword } from "../src/password-hash.js";
 import { createLoginThrottle } from "../src/login-throttle.js";
 import { createFileStateStore, createFileTokenStore, createMemoryStateStore } from "../src/stores.js";
 
 const OWNER_PASSWORD = "owner-password-value-16";
+const OWNER_PASSWORD_HASH = hashOwnerPassword(OWNER_PASSWORD);
 const REFRESH_TOKEN = "refresh-token-VALUE-should-not-log";
 const AUTH_CODE = "auth-code-VALUE-should-not-log";
 
@@ -20,7 +22,7 @@ function setupConfig(overrides = {}) {
     redirectUri: "https://mapleridgecpa.com/callback",
     environment: "production",
     scope: "com.intuit.quickbooks.accounting",
-    ownerPassword: OWNER_PASSWORD,
+    ownerPasswordHash: OWNER_PASSWORD_HASH,
     sessionSecret: "session-secret-value-at-least-32-characters",
     publicBaseUrl: "https://mapleridgecpa.com",
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "cpa-setup-")),
@@ -118,8 +120,10 @@ test("setup mode serves sign-in and disconnect without calling Intuit or changin
     assert.match(connect.body, /No request was sent to Intuit/);
     assert.equal(connect.headers.location, undefined);
     const callback = await request(port, { path: `/callback?code=${AUTH_CODE}&state=not-a-real-state-value` });
-    assert.equal(callback.status, 404);
-    assert.match(callback.body, /No authorization code was exchanged/);
+    assert.equal(callback.status, 302);
+    assert.equal(callback.body, "");
+    assert.equal(callback.headers.location.includes(AUTH_CODE), false);
+    assert.match(callback.headers["cache-control"], /no-cache, no-store/);
     const revoke = await request(port, {
       method: "POST",
       path: "/disconnect",
@@ -273,10 +277,10 @@ test("browser sign-in keeps an exact password, including surrounding spaces", as
     PORT: "8787",
     COOKIE_SECURE: "true",
     DATA_DIR: dataDir,
-    OWNER_PASSWORD: password,
+    OWNER_PASSWORD_HASH: hashOwnerPassword(password),
     SESSION_SECRET: "  session-secret-value-at-least-32-characters  ",
   });
-  assert.equal(loaded.ownerPassword, password);
+  assert.equal(loaded.ownerPasswordHash.includes(password), false);
   assert.equal(loaded.oauthConfigured, false);
   let calls = 0;
   const app = createApp({

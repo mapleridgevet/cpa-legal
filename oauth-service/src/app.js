@@ -4,9 +4,11 @@ import { openSeal, readCookie, seal, serializeCookie } from "./cookies.js";
 import { createLogger } from "./log.js";
 import { createFileThrottleStore, createLoginThrottle } from "./login-throttle.js";
 import { buildAuthorizeUrl, exchangeCode, revokeToken } from "./oauth.js";
-import { parseFormFields, sameSecret } from "./secret-diagnostic.js";
+import { verifyOwnerPassword } from "./password-hash.js";
+import { parseFormFields } from "./secret-diagnostic.js";
 import { assessIntuitPair } from "./secret-policy.js";
-import { createFileStateStore, createFileTokenStore, sha256 } from "./stores.js";
+import { createFileStateStore, sha256 } from "./stores.js";
+import { createProtectedTokenStore } from "./token-crypto.js";
 
 const RESULTS = {
   stored: "Authorization succeeded at Intuit and tokens were stored on this computer. They are not shown. The Windows connector has not been switched to this file.",
@@ -25,7 +27,7 @@ const RESULTS = {
   signin: "Sign in required.",
   not_configured: "QuickBooks is not configured. No request was sent to Intuit.",
   revoke_not_configured: "Revocation is not configured. No request was sent to Intuit. Local tokens were not changed.",
-  callback_not_configured: "QuickBooks is not configured. No authorization code was exchanged.",
+  unavailable: "QuickBooks is not configured. No authorization code was exchanged.",
   throttled: "Sign-in is temporarily unavailable. Try again later.",
 };
 
@@ -58,7 +60,7 @@ function page(title, body) {
 function send(res, status, headers, body) {
   const payload = Buffer.from(body);
   res.writeHead(status, {
-    "Cache-Control": "no-store",
+    "Cache-Control": "no-cache, no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
@@ -73,6 +75,20 @@ function redirect(res, location, extra = {}) {
   send(res, 303, { Location: location, "Content-Type": "text/plain; charset=utf-8", ...extra }, "Redirecting");
 }
 
+function redirectSensitive(res, location) {
+  res.writeHead(302, {
+    Location: location,
+    "Cache-Control": "no-cache, no-store",
+    "Content-Type": "text/plain; charset=utf-8",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+    "Content-Length": 0,
+  });
+  res.end();
+}
+
 async function readForm(req) {
   const chunks = [];
   let size = 0;
@@ -84,8 +100,8 @@ async function readForm(req) {
   return parseFormFields(Buffer.concat(chunks), req.headers["content-type"]);
 }
 
-function passwordsMatch(input, expected) {
-  return sameSecret(input, expected);
+function passwordsMatch(input, expectedHash) {
+  return verifyOwnerPassword(input, expectedHash);
 }
 
 function csrfMatch(session, supplied) {
@@ -115,9 +131,10 @@ export function createApp(options) {
   const fetchImpl = options.fetchImpl;
   const log = options.log || createLogger();
   if (oauthConfigured) log.noteSecret(intuit.clientSecret);
-  log.noteSecret(config.ownerPassword);
+  log.noteSecret(config.ownerPasswordHash);
   log.noteSecret(config.sessionSecret);
-  const tokenStore = options.tokenStore || createFileTokenStore(path.join(config.dataDir, "qbo-tokens.json"));
+  if (config.tokenKey) log.noteSecret(config.tokenKey.toString("base64"));
+  const tokenStore = options.tokenStore || createProtectedTokenStore(path.join(config.dataDir, "qbo-tokens.json"), config.tokenKey);
   const stateStore = options.stateStore || createFileStateStore(path.join(config.dataDir, "oauth-state.json"));
   const throttle = options.throttle || createLoginThrottle({
     now,
@@ -145,6 +162,10 @@ export function createApp(options) {
     const requestUrl = new URL(req.url, "http://127.0.0.1");
     const pathName = requestUrl.pathname;
     try {
+      if (req.method === "TRACE" || req.method === "TRACK") {
+        send(res, 405, { Allow: "GET, POST", "Content-Type": "text/plain; charset=utf-8" }, "");
+        return;
+      }
       if (req.method === "GET" && pathName === "/health") {
         const mode = oauthConfigured ? "oauth" : "setup";
         const body = {
@@ -170,7 +191,7 @@ export function createApp(options) {
           return;
         }
         const form = await readForm(req);
-        if (!passwordsMatch(form.get("password") || "", config.ownerPassword)) {
+        if (!passwordsMatch(form.get("password") || "", config.ownerPasswordHash)) {
           const failed = throttle.recordFailure(now());
           log.info(failed.locked ? "login_throttled" : "login_failed", { path: pathName });
           if (failed.locked) refuseThrottled(res, failed);
@@ -222,7 +243,7 @@ export function createApp(options) {
       if (req.method === "GET" && pathName === "/callback") {
         if (!oauthConfigured) {
           log.info("callback_unavailable", { path: pathName });
-          send(res, 404, { "Content-Type": "text/plain; charset=utf-8" }, RESULTS.callback_not_configured);
+          redirectSensitive(res, "/auth-result?result=rejected&reason=unavailable");
           return;
         }
         const code = requestUrl.searchParams.get("code");
@@ -232,23 +253,23 @@ export function createApp(options) {
         if (state) log.noteSecret(state);
         if (!session) {
           log.info("callback_rejected", { reason: "session" });
-          redirect(res, "/auth-result?result=rejected&reason=session");
+          redirectSensitive(res, "/auth-result?result=rejected&reason=session");
           return;
         }
         if (oauthError) {
           log.info("callback_rejected", { reason: "access_denied" });
-          redirect(res, "/auth-result?result=rejected&reason=access_denied");
+          redirectSensitive(res, "/auth-result?result=rejected&reason=access_denied");
           return;
         }
         const consumed = stateStore.consume(state, session.sid, now());
         if (!consumed.ok) {
           log.info("callback_rejected", { reason: consumed.reason });
-          redirect(res, `/auth-result?result=rejected&reason=${consumed.reason}`);
+          redirectSensitive(res, `/auth-result?result=rejected&reason=${consumed.reason}`);
           return;
         }
         if (!code) {
           log.info("callback_rejected", { reason: "missing_code" });
-          redirect(res, "/auth-result?result=rejected&reason=missing_code");
+          redirectSensitive(res, "/auth-result?result=rejected&reason=missing_code");
           return;
         }
         const exchanged = await exchangeCode({
@@ -260,7 +281,7 @@ export function createApp(options) {
         });
         if (!exchanged.ok) {
           log.info("token_exchange_failed", { status: exchanged.status });
-          redirect(res, "/auth-result?result=rejected&reason=exchange");
+          redirectSensitive(res, "/auth-result?result=rejected&reason=exchange");
           return;
         }
         log.noteSecret(exchanged.tokens.access_token);
@@ -278,7 +299,7 @@ export function createApp(options) {
           obtainedAt: now(),
         });
         log.info("tokens_stored", { status: exchanged.status });
-        redirect(res, "/auth-result?result=stored");
+        redirectSensitive(res, "/auth-result?result=stored");
         return;
       }
       if (req.method === "GET" && pathName === "/auth-result") {

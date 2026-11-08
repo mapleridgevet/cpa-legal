@@ -116,19 +116,28 @@ try {
 }
 
 $ownerSecure = $secrets.OWNER_PASSWORD
+$ownerHash = $secrets.OWNER_PASSWORD_HASH
 $sessionSecure = $secrets.SESSION_SECRET
-if ($ownerSecure -isnot [System.Security.SecureString]) {
-  Write-Diag "ownerType" "unexpected"
-  exit 1
-}
+$ownerIsSecure = $ownerSecure -is [System.Security.SecureString]
+$ownerIsHash = ($ownerHash -is [string]) -and $ownerHash.StartsWith("scrypt$")
 if ($sessionSecure -isnot [System.Security.SecureString]) {
   Write-Diag "sessionType" "unexpected"
   exit 1
 }
-Write-Diag "ownerType" "SecureString"
+if ($ownerIsSecure -and $ownerIsHash) {
+  Write-Diag "ownerType" "ambiguous"
+  exit 1
+}
+if ($ownerIsHash) { Write-Diag "ownerType" "one-way" }
+elseif ($ownerIsSecure) { Write-Diag "ownerType" "SecureString" }
+else {
+  Write-Diag "ownerType" "unexpected"
+  exit 1
+}
 Write-Diag "sessionType" "SecureString"
 
-$ownerPlain = Convert-FromSecure $ownerSecure
+$ownerPlain = ""
+if ($ownerIsSecure) { $ownerPlain = Convert-FromSecure $ownerSecure }
 $sessionPlain = Convert-FromSecure $sessionSecure
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -154,9 +163,15 @@ if ($Compare) {
     exit 0
   }
   $candidatePlain = Convert-FromSecure $candidateSecure
-  $compareNames = @("OWNER_PASSWORD", "SESSION_SECRET", "CPA_DIAG_CANDIDATE", "CPA_DIAG_MODE")
+  $compareNames = @("OWNER_PASSWORD", "OWNER_PASSWORD_HASH", "SESSION_SECRET", "CPA_DIAG_CANDIDATE", "CPA_DIAG_MODE")
   try {
-    Set-Item -Path Env:OWNER_PASSWORD -Value $ownerPlain
+    Remove-Item Env:OWNER_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:OWNER_PASSWORD_HASH -ErrorAction SilentlyContinue
+    if ($ownerIsHash) {
+      Set-Item -Path Env:OWNER_PASSWORD_HASH -Value ([string]$ownerHash)
+    } else {
+      Set-Item -Path Env:OWNER_PASSWORD -Value $ownerPlain
+    }
     Set-Item -Path Env:SESSION_SECRET -Value $sessionPlain
     Set-Item -Path Env:CPA_DIAG_CANDIDATE -Value $candidatePlain
     Set-Item -Path Env:CPA_DIAG_MODE -Value "compare"
@@ -178,6 +193,12 @@ if ($Compare) {
     $sessionPlain = $null
     $candidatePlain = $null
   }
+  exit 0
+}
+
+if ($ownerIsHash) {
+  Write-Diag "ownerReversible" "false"
+  Write-Diag "filesChanged" "false"
   exit 0
 }
 

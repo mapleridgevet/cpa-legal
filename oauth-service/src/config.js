@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isOwnerPasswordHash } from "./password-hash.js";
 import { assessIntuitPair } from "./secret-policy.js";
 
 const SERVICE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,8 +69,17 @@ export function loadConfig(env) {
   const intuit = assessIntuitPair(env.QBO_CLIENT_ID, env.QBO_CLIENT_SECRET);
   if (!intuit.ok) problems.push(intuit.message);
   const redirectUri = required(env, "QBO_REDIRECT_URI", problems);
-  const ownerPassword = requiredSecret(env, "OWNER_PASSWORD", problems);
+  const reversibleOwner = typeof env.OWNER_PASSWORD === "string" ? env.OWNER_PASSWORD : "";
+  const ownerPasswordHash = typeof env.OWNER_PASSWORD_HASH === "string" ? env.OWNER_PASSWORD_HASH : "";
+  if (reversibleOwner.trim() !== "") problems.push("reversible OWNER_PASSWORD is not accepted");
+  if (!isOwnerPasswordHash(ownerPasswordHash)) problems.push("OWNER_PASSWORD_HASH is missing");
   const sessionSecret = requiredSecret(env, "SESSION_SECRET", problems);
+  let tokenKey = null;
+  if (typeof env.TOKEN_ENC_KEY === "string" && env.TOKEN_ENC_KEY.trim() !== "") {
+    const decoded = Buffer.from(env.TOKEN_ENC_KEY.trim(), "base64");
+    if (decoded.length !== 32) problems.push("TOKEN_ENC_KEY is invalid");
+    else tokenKey = decoded;
+  }
   const publicBaseUrl = required(env, "PUBLIC_BASE_URL", problems);
   const dataDirRaw = required(env, "DATA_DIR", problems);
   const scope = (env.QBO_SCOPE || "com.intuit.quickbooks.accounting").trim();
@@ -77,7 +87,6 @@ export function loadConfig(env) {
   const bindHost = (env.BIND_HOST || "127.0.0.1").trim();
   const port = Number(env.PORT || 8787);
 
-  if (ownerPassword && ownerPassword.length < 16) problems.push("OWNER_PASSWORD must be at least 16 characters");
   if (sessionSecret && sessionSecret.length < 32) problems.push("SESSION_SECRET must be at least 32 characters");
   if (!Number.isInteger(port) || port < 1 || port > 65535) problems.push("PORT is invalid");
 
@@ -135,7 +144,8 @@ export function loadConfig(env) {
     redirectUri,
     environment,
     scope,
-    ownerPassword,
+    ownerPasswordHash,
+    tokenKey,
     sessionSecret,
     publicBaseUrl: pub.origin,
     dataDir,

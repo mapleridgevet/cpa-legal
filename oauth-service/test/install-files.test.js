@@ -15,6 +15,7 @@ function writeRelease(dir, extra = {}) {
     "host-settings.json",
     "install.ps1",
     "start-oauth-service.ps1",
+    "migrate-secrets.ps1",
     "README.md",
     "src/protect-path.js",
     "src/install-files.js",
@@ -25,6 +26,10 @@ function writeRelease(dir, extra = {}) {
     "src/login-throttle.js",
     "src/secret-policy.js",
     "src/check-intuit-credentials.js",
+    "src/password-hash.js",
+    "src/token-crypto.js",
+    "src/owner-password-cli.js",
+    "src/migrate-token-file.js",
     "test/state-file.test.js",
   ]) {
     const file = path.join(dir, rel);
@@ -46,11 +51,13 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.equal(installer.includes("$ConfigureIntuit"), true);
   assert.equal(installer.includes("src\\index.js") || installer.includes("src/index.js"), false);
   assert.equal(installer.includes("start-oauth-service.ps1"), false);
+  assert.equal(installer.includes("migrate-secrets.ps1"), false);
   assert.match(installer, /Move-Item -LiteralPath \$temp -Destination \$dest/);
   assert.match(installer, /check-intuit-credentials\.js/);
   const starter = fs.readFileSync(path.join(releaseRoot, "start-oauth-service.ps1"), "utf8");
   assert.match(starter, /Intuit credentials are partial/);
   assert.match(starter, /Starting in setup mode/);
+  assert.match(starter, /still reversible/);
   assert.equal(starter.includes("QBO_CLIENT_ID") && starter.includes("OWNER_PASSWORD"), true);
   const winUrl = "file:///C:/Users/naesm/cpa-oauth-service/test/install-files.test.js";
   const fromPathname = path.win32.resolve(path.win32.dirname(new URL(winUrl).pathname), "..");

@@ -166,13 +166,32 @@ if ($ConfigureOwner) {
   }
   $ownerPassword = Read-MaskedSecret "Owner password, 16 or more characters (input stays hidden)" 16
   $sessionSecret = Read-MaskedSecret "Session secret, 32 or more characters (input stays hidden)" 32
+  $ownerPlain = Convert-FromSecure $ownerPassword
+  $env:OWNER_PASSWORD = $ownerPlain
+  $ownerHash = ""
+  try {
+    $ownerHash = (& node (Join-Path $ProgramDir "src\owner-password-cli.js") hash)
+    if ($LASTEXITCODE -ne 0) { throw "Could not hash the owner password. Nothing was saved." }
+    $ownerHash = [string]$ownerHash
+    if (-not $ownerHash.StartsWith("scrypt$")) { throw "Could not hash the owner password. Nothing was saved." }
+    $env:OWNER_PASSWORD_HASH = $ownerHash
+    & node (Join-Path $ProgramDir "src\owner-password-cli.js") verify | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Owner password hash did not verify. Nothing was saved." }
+  } finally {
+    Remove-Item Env:OWNER_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:OWNER_PASSWORD_HASH -ErrorAction SilentlyContinue
+    $ownerPlain = $null
+  }
   $bag = [ordered]@{
-    OWNER_PASSWORD = $ownerPassword
+    OWNER_PASSWORD_HASH = $ownerHash
     SESSION_SECRET = $sessionSecret
   }
   if ($presence.Id -and $presence.Secret) {
     $bag.QBO_CLIENT_ID = $existing.QBO_CLIENT_ID
     $bag.QBO_CLIENT_SECRET = $existing.QBO_CLIENT_SECRET
+  }
+  if ($null -ne $existing -and ($existing.TOKEN_ENC_KEY -is [System.Security.SecureString]) -and $existing.TOKEN_ENC_KEY.Length -gt 0) {
+    $bag.TOKEN_ENC_KEY = $existing.TOKEN_ENC_KEY
   }
   Save-SecretBag $bag
   Write-Host "Owner sign-in secrets were saved for this Windows user only. They were not displayed."
@@ -199,12 +218,20 @@ if ($ConfigureIntuit) {
   if (-not $accepted) {
     throw "Intuit credentials were refused. Nothing was saved and the service was not started."
   }
-  Save-SecretBag ([ordered]@{
-    OWNER_PASSWORD = $existing.OWNER_PASSWORD
+  $intuitBag = [ordered]@{
     SESSION_SECRET = $existing.SESSION_SECRET
     QBO_CLIENT_ID = $clientId
     QBO_CLIENT_SECRET = $clientSecret
-  })
+  }
+  if (($existing.OWNER_PASSWORD_HASH -is [string]) -and $existing.OWNER_PASSWORD_HASH.StartsWith("scrypt$")) {
+    $intuitBag.OWNER_PASSWORD_HASH = [string]$existing.OWNER_PASSWORD_HASH
+  } elseif (Test-SecurePresent $existing "OWNER_PASSWORD" 16) {
+    $intuitBag.OWNER_PASSWORD = $existing.OWNER_PASSWORD
+  }
+  if (($existing.TOKEN_ENC_KEY -is [System.Security.SecureString]) -and $existing.TOKEN_ENC_KEY.Length -gt 0) {
+    $intuitBag.TOKEN_ENC_KEY = $existing.TOKEN_ENC_KEY
+  }
+  Save-SecretBag $intuitBag
   Write-Host "Intuit production keys were saved. Owner secrets, config, and token files were kept."
   Write-Host "The values were not displayed. The service was not started. OAuth was not attempted."
   exit 0

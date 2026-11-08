@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { assertOwnerOnlyFile } from "../src/acl.js";
 import { createApp } from "../src/app.js";
+import { hashOwnerPassword } from "../src/password-hash.js";
 import { createFileTokenStore, createMemoryStateStore } from "../src/stores.js";
 
 const CLIENT_SECRET = "test-client-secret-value-not-real";
@@ -13,6 +14,7 @@ const ACCESS_TOKEN = "access-token-VALUE-should-not-log";
 const REFRESH_TOKEN = "refresh-token-VALUE-should-not-log";
 const AUTH_CODE = "auth-code-VALUE-should-not-log";
 const OWNER_PASSWORD = "owner-password-value-16";
+const OWNER_PASSWORD_HASH = hashOwnerPassword(OWNER_PASSWORD);
 
 function testConfig(overrides = {}) {
   return {
@@ -21,7 +23,7 @@ function testConfig(overrides = {}) {
     redirectUri: "https://auth.example.test/callback",
     environment: "sandbox",
     scope: "com.intuit.quickbooks.accounting",
-    ownerPassword: OWNER_PASSWORD,
+    ownerPasswordHash: OWNER_PASSWORD_HASH,
     sessionSecret: "session-secret-value-at-least-32-characters",
     publicBaseUrl: "https://auth.example.test",
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "cpa-oauth-")),
@@ -141,7 +143,11 @@ test("callback rejects unknown, reused, expired, and cross-session state", async
       path: `/callback?code=${AUTH_CODE}&state=not-the-issued-state-value`,
       headers: { Cookie: owner.cookie },
     });
-    assert.equal(unknown.status, 303);
+    assert.equal(unknown.status, 302);
+    assert.equal(unknown.body, "");
+    assert.equal(unknown.headers.location.includes(AUTH_CODE), false);
+    assert.match(unknown.headers["cache-control"], /no-cache/);
+    assert.match(unknown.headers["cache-control"], /no-store/);
     assert.match(unknown.headers.location, /reason=state/);
     assert.equal(calls.length, 0);
 

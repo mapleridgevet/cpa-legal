@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
+import { verifyOwnerPassword } from "./password-hash.js";
 
 export function sameSecret(input, expected) {
   const a = crypto.createHash("sha256").update(String(input).normalize("NFC"), "utf8").digest();
@@ -104,18 +105,22 @@ function emitLines(lines, secrets) {
 
 function reportCompare() {
   const owner = process.env.OWNER_PASSWORD;
+  const ownerHash = process.env.OWNER_PASSWORD_HASH;
   const session = process.env.SESSION_SECRET;
   const candidate = process.env.CPA_DIAG_CANDIDATE;
-  if (typeof owner !== "string" || typeof candidate !== "string") {
+  if (typeof candidate !== "string" || (typeof owner !== "string" && typeof ownerHash !== "string")) {
     console.log("DIAG|compare|unavailable");
     process.exit(1);
   }
+  const matchesOwner = typeof ownerHash === "string" && ownerHash !== ""
+    ? verifyOwnerPassword(candidate, ownerHash)
+    : sameSecret(candidate, owner);
   const lines = [
-    `DIAG|matchesOwner|${sameSecret(candidate, owner)}`,
+    `DIAG|matchesOwner|${matchesOwner}`,
     `DIAG|matchesSession|${typeof session === "string" && sameSecret(candidate, session)}`,
     "DIAG|filesChanged|false",
   ];
-  const ok = emitLines(lines, [owner, session, candidate]);
+  const ok = emitLines(lines, [owner, ownerHash, session, candidate]);
   process.exit(ok ? 0 : 2);
 }
 
@@ -165,7 +170,7 @@ function listenOnce() {
     const payload = Buffer.from(safe ? `${lines.join("\n")}\n` : "DIAG|refused|output\n");
     res.writeHead(200, {
       "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "no-cache, no-store",
       "Content-Length": payload.length,
     });
     res.end(payload);

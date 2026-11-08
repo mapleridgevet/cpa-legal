@@ -40,7 +40,17 @@ function Test-SecurePresent {
   return ($null -ne $value -and $value -is [System.Security.SecureString] -and $value.Length -ge $Minimum)
 }
 
-if (-not (Test-SecurePresent $secrets "OWNER_PASSWORD" 16) -or -not (Test-SecurePresent $secrets "SESSION_SECRET" 32)) {
+$hasReversibleOwner = Test-SecurePresent $secrets "OWNER_PASSWORD" 1
+$hasOwnerHash = ($secrets.OWNER_PASSWORD_HASH -is [string]) -and $secrets.OWNER_PASSWORD_HASH.StartsWith("scrypt$")
+if ($hasReversibleOwner -and -not $hasOwnerHash) {
+  Write-Host "Not started. The owner password is still reversible. Run migrate-secrets.ps1. Nothing was started."
+  exit 1
+}
+if ($hasReversibleOwner -and $hasOwnerHash) {
+  Write-Host "Not started. Both a reversible owner password and a hash are present. Nothing was started."
+  exit 1
+}
+if (-not $hasOwnerHash -or -not (Test-SecurePresent $secrets "SESSION_SECRET" 32)) {
   Write-Host "Not started. Owner sign-in is not configured. OAuth was not attempted."
   exit 1
 }
@@ -51,7 +61,8 @@ if ($hasClientId -xor $hasClientSecret) {
   exit 1
 }
 
-$names = @("OWNER_PASSWORD", "SESSION_SECRET")
+$names = @("OWNER_PASSWORD_HASH", "SESSION_SECRET")
+if (Test-SecurePresent $secrets "TOKEN_ENC_KEY" 1) { $names += @("TOKEN_ENC_KEY") }
 if ($hasClientId -and $hasClientSecret) {
   $names += @("QBO_CLIENT_ID", "QBO_CLIENT_SECRET")
   Write-Host "Starting with QuickBooks credentials configured. Tokens are not displayed."
@@ -60,10 +71,15 @@ if ($hasClientId -and $hasClientSecret) {
   Remove-Item Env:QBO_CLIENT_SECRET -ErrorAction SilentlyContinue
   Write-Host "Starting in setup mode. OAuth is not configured."
 }
+Remove-Item Env:OWNER_PASSWORD -ErrorAction SilentlyContinue
 
 try {
   foreach ($name in $names) {
-    Set-Item -Path "Env:$name" -Value (Convert-FromSecure $secrets.$name)
+    if ($name -eq "OWNER_PASSWORD_HASH") {
+      Set-Item -Path "Env:$name" -Value ([string]$secrets.OWNER_PASSWORD_HASH)
+    } else {
+      Set-Item -Path "Env:$name" -Value (Convert-FromSecure $secrets.$name)
+    }
   }
   $env:QBO_REDIRECT_URI = [string]$cfg.QBO_REDIRECT_URI
   $env:QBO_ENVIRONMENT = [string]$cfg.QBO_ENVIRONMENT
@@ -77,7 +93,7 @@ try {
   & node src/index.js
   exit $LASTEXITCODE
 } finally {
-  foreach ($name in @("OWNER_PASSWORD", "SESSION_SECRET", "QBO_CLIENT_ID", "QBO_CLIENT_SECRET")) {
+  foreach ($name in @("OWNER_PASSWORD", "OWNER_PASSWORD_HASH", "SESSION_SECRET", "QBO_CLIENT_ID", "QBO_CLIENT_SECRET", "TOKEN_ENC_KEY")) {
     Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
   }
 }
