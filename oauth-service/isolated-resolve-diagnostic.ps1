@@ -55,6 +55,12 @@ function Get-MismatchIndex {
   return -1
 }
 
+$Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+Assert-Contained $Here | Out-Null
+$DecoderPath = Join-Path $Here "decode-child-text.ps1"
+Assert-Contained $DecoderPath | Out-Null
+. $DecoderPath
+
 $root = Assert-Contained $Root
 $migrate = Assert-Contained $Migrate
 if ((Split-Path -Leaf $migrate) -ne "migrate-secrets.ps1") { throw "Refusing a file that is not migrate-secrets.ps1." }
@@ -89,8 +95,7 @@ try {
   $start.RedirectStandardOutput = $true
   $start.RedirectStandardError = $true
   $start.CreateNoWindow = $true
-  $start.StandardOutputEncoding = [System.Text.Encoding]::Unicode
-  $start.StandardErrorEncoding = [System.Text.Encoding]::Unicode
+  Set-ChildStreamEncoding $start
   $process = New-Object System.Diagnostics.Process
   $process.StartInfo = $start
   [void]$process.Start()
@@ -99,8 +104,8 @@ try {
   $stderrTask = $process.StandardError.ReadToEndAsync()
   $process.WaitForExit()
   $exitCode = $process.ExitCode
-  $stdout = [string]$stdoutTask.Result
-  $stderr = [string]$stderrTask.Result
+  $stdout = ConvertFrom-ChildText ([string]$stdoutTask.Result)
+  $stderr = ConvertFrom-ChildText ([string]$stderrTask.Result)
 } catch {
   $startFailed = $true
 } finally {

@@ -76,8 +76,7 @@ function Invoke-MigrationChild {
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.CreateNoWindow = $true
-    $start.StandardOutputEncoding = [System.Text.Encoding]::Unicode
-    $start.StandardErrorEncoding = [System.Text.Encoding]::Unicode
+    Set-ChildStreamEncoding $start
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $start
     [void]$process.Start()
@@ -85,7 +84,7 @@ function Invoke-MigrationChild {
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
     $code = $process.ExitCode
-    $output = [string]$stdoutTask.Result + [string]$stderrTask.Result
+    $output = (ConvertFrom-ChildText ([string]$stdoutTask.Result)) + (ConvertFrom-ChildText ([string]$stderrTask.Result))
   } finally {
     $ErrorActionPreference = $previousAction
     if ($null -eq $previous) { Remove-Item Env:CPA_MIGRATION_ISOLATED -ErrorAction SilentlyContinue }
@@ -118,6 +117,7 @@ $Migrate = Join-Path $Here "migrate-secrets.ps1"
 if (-not (Test-Path -LiteralPath $Migrate)) { throw "migrate-secrets.ps1 is not beside this harness." }
 Assert-IsolatedPath $Migrate | Out-Null
 foreach ($rel in @(
+  "decode-child-text.ps1",
   "src\owner-password-cli.js",
   "src\migrate-token-file.js",
   "src\token-key-cli.js",
@@ -126,6 +126,8 @@ foreach ($rel in @(
 )) {
   Assert-IsolatedPath (Join-Path $Here $rel) | Out-Null
 }
+$DecoderPath = Join-Path $Here "decode-child-text.ps1"
+. $DecoderPath
 
 $fixture = Join-Path $root ("fixture-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Path $fixture | Out-Null
