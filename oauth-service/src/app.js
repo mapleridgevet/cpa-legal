@@ -122,6 +122,21 @@ function quickbooksState(oauthConfigured, tokenStore) {
   return "not-connected";
 }
 
+export function installServer(server) {
+  server.on("clientError", (err, socket) => {
+    if (socket.destroyed || !socket.writable) return;
+    const started = Boolean(socket._httpMessage && socket._httpMessage.headersSent);
+    if (started) {
+      socket.end();
+      return;
+    }
+    socket.end(
+      "HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, POST\r\nContent-Length: 0\r\nCache-Control: no-cache, no-store\r\nConnection: close\r\n\r\n",
+    );
+  });
+  return server;
+}
+
 export function createApp(options) {
   const config = options.config;
   const intuit = assessIntuitPair(config.clientId || "", config.clientSecret || "");

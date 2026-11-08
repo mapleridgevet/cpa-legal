@@ -4,7 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.js";
+import { createApp, installServer } from "../src/app.js";
 import { hashOwnerPassword, planOwnerMigration, verifyOwnerPassword } from "../src/password-hash.js";
 import { createMemoryStateStore } from "../src/stores.js";
 import { classifyTokenPayload, createProtectedTokenStore, decryptTokenRecord, migrateTokenFile } from "../src/token-crypto.js";
@@ -35,7 +35,7 @@ function appConfig(dir, extra = {}) {
 }
 
 function listen(handler) {
-  const server = http.createServer(handler);
+  const server = installServer(http.createServer(handler));
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
@@ -122,6 +122,7 @@ test("TRACE is not echoed and sensitive pages are not cached", async () => {
     const trace = await request(port, { method: "TRACE", path: "/login", body: "password=owner-password-value-16" });
     assert.equal(trace.status, 405);
     assert.equal(trace.body, "");
+    assert.equal(trace.body.includes("password"), false);
     assert.equal(trace.headers.allow, "GET, POST");
     const home = await request(port, { path: "/" });
     assert.match(home.headers["cache-control"], /no-cache/);
