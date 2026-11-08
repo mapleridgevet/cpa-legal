@@ -1,11 +1,38 @@
 # Explicit local migration. Does not start the listener and does not call Intuit.
 # Hashes a reversible owner password, keeps the session secret and Intuit keys,
 # and can encrypt a plaintext token file. Prints no password, hash, key, or token.
-param()
+# With no -DataDir, the live data folder is used. Tests must pass -DataDir and set
+# CPA_MIGRATION_ISOLATED=1, which rejects that live folder.
+param(
+  [string]$DataDir = "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth"
+)
 
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DataDir = "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth"
+
+function Assert-MigrationPath {
+  param([string]$Candidate)
+  $full = [System.IO.Path]::GetFullPath($Candidate)
+  if ($env:CPA_MIGRATION_ISOLATED -ne "1") { return $full }
+  $tempRoot = [System.IO.Path]::GetFullPath($env:TEMP).TrimEnd("\")
+  $probe = $full.TrimEnd("\")
+  if (-not ($probe.Equals($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or $probe.StartsWith($tempRoot + "\", [StringComparison]::OrdinalIgnoreCase))) {
+    throw "Refusing isolated migration outside TEMP."
+  }
+  foreach ($blocked in @(
+    "C:\Users\naesm\cpa-oauth-service",
+    "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth",
+    "C:\Users\naesm\quickbooks-card-connector"
+  )) {
+    $blockFull = [System.IO.Path]::GetFullPath($blocked).TrimEnd("\")
+    if ($probe.Equals($blockFull, [StringComparison]::OrdinalIgnoreCase) -or $probe.StartsWith($blockFull + "\", [StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing isolated migration on a live CPA path."
+    }
+  }
+  return $full
+}
+
+$DataDir = Assert-MigrationPath $DataDir
 $SecretPath = Join-Path $DataDir "secrets.clixml"
 $TokenPath = Join-Path $DataDir "qbo-tokens.json"
 

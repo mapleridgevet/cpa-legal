@@ -30,6 +30,7 @@ function writeRelease(dir, extra = {}) {
     "src/token-crypto.js",
     "src/owner-password-cli.js",
     "src/migrate-token-file.js",
+    "src/token-check-cli.js",
     "test/state-file.test.js",
   ]) {
     const file = path.join(dir, rel);
@@ -56,8 +57,13 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.match(harness, /Mandatory = \$true/);
   assert.match(harness, /Refusing to use a live CPA path/);
   assert.match(harness, /Refusing to use a folder outside TEMP/);
+  assert.match(harness, /migrate-secrets\.ps1/);
+  assert.match(harness, /CPA_MIGRATION_ISOLATED/);
   assert.equal(harness.includes("8787"), false);
-  assert.equal(harness.includes("migrate-secrets.ps1"), false);
+  const migration = fs.readFileSync(path.join(releaseRoot, "migrate-secrets.ps1"), "utf8");
+  assert.match(migration, /\[string\]\$DataDir = "C:\\Users\\naesm\\AppData\\Local\\MapleRidge\\cpa-oauth"/);
+  assert.match(migration, /CPA_MIGRATION_ISOLATED/);
+  assert.match(migration, /Refusing isolated migration on a live CPA path/);
   assert.match(installer, /Move-Item -LiteralPath \$temp -Destination \$dest/);
   assert.match(installer, /check-intuit-credentials\.js/);
   const starter = fs.readFileSync(path.join(releaseRoot, "start-oauth-service.ps1"), "utf8");

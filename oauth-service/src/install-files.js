@@ -29,6 +29,7 @@ export const REQUIRED = [
   "src/token-crypto.js",
   "src/owner-password-cli.js",
   "src/migrate-token-file.js",
+  "src/token-check-cli.js",
   "test/state-file.test.js",
 ];
 
