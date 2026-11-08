@@ -52,6 +52,12 @@ test("the source tree and installer contain the helper before it is invoked", ()
   assert.equal(installer.includes("src\\index.js") || installer.includes("src/index.js"), false);
   assert.equal(installer.includes("start-oauth-service.ps1"), false);
   assert.equal(installer.includes("migrate-secrets.ps1"), false);
+  const harness = fs.readFileSync(path.join(releaseRoot, "isolated-migration-test.ps1"), "utf8");
+  assert.match(harness, /Mandatory = \$true/);
+  assert.match(harness, /Refusing to use a live CPA path/);
+  assert.match(harness, /Refusing to use a folder outside TEMP/);
+  assert.equal(harness.includes("8787"), false);
+  assert.equal(harness.includes("migrate-secrets.ps1"), false);
   assert.match(installer, /Move-Item -LiteralPath \$temp -Destination \$dest/);
   assert.match(installer, /check-intuit-credentials\.js/);
   const starter = fs.readFileSync(path.join(releaseRoot, "start-oauth-service.ps1"), "utf8");
