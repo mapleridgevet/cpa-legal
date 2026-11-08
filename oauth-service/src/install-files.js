@@ -9,6 +9,9 @@ export const ROOT_FILES = [
   "install.ps1",
   "start-oauth-service.ps1",
   "migrate-secrets.ps1",
+  "decode-child-text.ps1",
+  "isolated-migration-test.ps1",
+  "isolated-resolve-diagnostic.ps1",
   "README.md",
 ];
 

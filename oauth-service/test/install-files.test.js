@@ -4,39 +4,43 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { copyRelease, missingReleaseFiles, releaseRootFromModuleUrl } from "../src/install-files.js";
+import { spawnSync } from "node:child_process";
+import { REQUIRED, ROOT_FILES, copyRelease, missingReleaseFiles, releaseRootFromModuleUrl } from "../src/install-files.js";
 
 const releaseRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function writeRelease(dir, extra = {}) {
-  for (const rel of [
-    "package.json",
-    "package-lock.json",
-    "host-settings.json",
-    "install.ps1",
-    "start-oauth-service.ps1",
-    "migrate-secrets.ps1",
-    "README.md",
-    "src/protect-path.js",
-    "src/install-files.js",
-    "src/acl.js",
-    "src/preflight.js",
-    "src/index.js",
-    "src/app.js",
-    "src/login-throttle.js",
-    "src/secret-policy.js",
-    "src/check-intuit-credentials.js",
-    "src/password-hash.js",
-    "src/token-crypto.js",
-    "src/owner-password-cli.js",
-    "src/migrate-token-file.js",
-    "src/token-check-cli.js",
-    "test/state-file.test.js",
-  ]) {
+  for (const rel of REQUIRED) {
     const file = path.join(dir, rel);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, extra[rel] ?? `new ${rel}`);
   }
+}
+
+function rootFilesReadBySuite(dir) {
+  const names = new Set();
+  for (const name of fs.readdirSync(path.join(dir, "test")).filter((entry) => entry.endsWith(".js"))) {
+    const text = fs.readFileSync(path.join(dir, "test", name), "utf8");
+    for (const match of text.matchAll(/join\(\s*(?:root|releaseRoot|serviceRoot)\s*,\s*"([^"]+)"\s*\)/g)) names.add(match[1]);
+    for (const match of text.matchAll(/"\.\.",\s*"([^"]+)"/g)) names.add(match[1]);
+  }
+  return [...names].filter((name) => !name.includes("/") && !name.includes("\\") && name.includes("."));
+}
+
+function assertInstalledSuitePasses(program) {
+  const env = { ...process.env, CPA_SKIP_INSTALLED_RERUN: "1" };
+  delete env.NODE_CHANNEL_FD;
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ["--test"], {
+    cwd: program,
+    env,
+    encoding: "utf8",
+  });
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  assert.equal(result.status, 0, output.slice(-800));
+  const failed = output.match(/(?:^|\n)[^\n]*\bfail\s+(\d+)/);
+  const passed = output.match(/(?:^|\n)[^\n]*\bpass\s+(\d+)/);
+  assert.equal(failed !== null && passed !== null && Number(failed[1]) === 0 && Number(passed[1]) >= 40, true, output.slice(-800));
 }
 
 test("the source tree and installer contain the helper before it is invoked", () => {
@@ -79,6 +83,38 @@ test("the source tree and installer contain the helper before it is invoked", ()
   const fromPathname = path.win32.resolve(path.win32.dirname(new URL(winUrl).pathname), "..");
   assert.equal(releaseRootFromModuleUrl(winUrl, path.win32), "C:\\Users\\naesm\\cpa-oauth-service");
   assert.notEqual(fromPathname, "C:\\Users\\naesm\\cpa-oauth-service");
+});
+
+test("the installer copies every root file the suite reads, then the installed tree passes", () => {
+  if (process.env.CPA_SKIP_INSTALLED_RERUN === "1") return;
+  const needed = rootFilesReadBySuite(releaseRoot);
+  assert.deepEqual(needed.filter((name) => !ROOT_FILES.includes(name)), []);
+  for (const name of ["decode-child-text.ps1", "isolated-migration-test.ps1", "isolated-resolve-diagnostic.ps1"]) {
+    assert.equal(ROOT_FILES.includes(name), true);
+    assert.equal(fs.existsSync(path.join(releaseRoot, name)), true);
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cpa-installed-"));
+  const fresh = path.join(root, "fresh");
+  copyRelease(releaseRoot, fresh);
+  for (const name of needed) assert.equal(fs.existsSync(path.join(fresh, name)), true);
+  assertInstalledSuitePasses(fresh);
+
+  const upgrade = path.join(root, "upgrade");
+  fs.mkdirSync(path.join(upgrade, "src"), { recursive: true });
+  fs.writeFileSync(path.join(upgrade, "src", "acl.js"), "old acl");
+  const data = path.join(root, "data");
+  fs.mkdirSync(data, { recursive: true });
+  fs.writeFileSync(path.join(data, "secrets.clixml"), "keep-secret");
+  fs.writeFileSync(path.join(data, "service-config.json"), "keep-config");
+  fs.writeFileSync(path.join(data, "login-throttle.json"), "keep-throttle");
+  copyRelease(releaseRoot, upgrade);
+  assert.equal(fs.readFileSync(path.join(data, "secrets.clixml"), "utf8"), "keep-secret");
+  assert.equal(fs.readFileSync(path.join(data, "service-config.json"), "utf8"), "keep-config");
+  assert.equal(fs.readFileSync(path.join(data, "login-throttle.json"), "utf8"), "keep-throttle");
+  assert.equal(fs.readFileSync(path.join(upgrade, "src", "acl.js"), "utf8").includes("old acl"), false);
+  for (const name of needed) assert.equal(fs.existsSync(path.join(upgrade, name)), true);
+  assertInstalledSuitePasses(upgrade);
 });
 
 test("fresh install and upgrade both place protect-path.js without nesting src", () => {
