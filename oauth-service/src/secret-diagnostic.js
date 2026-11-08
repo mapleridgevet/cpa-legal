@@ -102,6 +102,23 @@ function emitLines(lines, secrets) {
   return true;
 }
 
+function reportCompare() {
+  const owner = process.env.OWNER_PASSWORD;
+  const session = process.env.SESSION_SECRET;
+  const candidate = process.env.CPA_DIAG_CANDIDATE;
+  if (typeof owner !== "string" || typeof candidate !== "string") {
+    console.log("DIAG|compare|unavailable");
+    process.exit(1);
+  }
+  const lines = [
+    `DIAG|matchesOwner|${sameSecret(candidate, owner)}`,
+    `DIAG|matchesSession|${typeof session === "string" && sameSecret(candidate, session)}`,
+    "DIAG|filesChanged|false",
+  ];
+  const ok = emitLines(lines, [owner, session, candidate]);
+  process.exit(ok ? 0 : 2);
+}
+
 function reportChild() {
   const owner = process.env.OWNER_PASSWORD;
   const session = process.env.SESSION_SECRET;
@@ -166,6 +183,7 @@ function listenOnce() {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   if (process.env.CPA_DIAG_MODE === "listen") listenOnce();
+  else if (process.env.CPA_DIAG_MODE === "compare") reportCompare();
   else {
     const ok = reportChild();
     process.exit(ok ? 0 : 2);

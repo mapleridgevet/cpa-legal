@@ -45,6 +45,45 @@ test("the launcher report describes a secret without printing it or a hash", asy
   assert.equal(combined.toLowerCase().includes("sha256"), false);
 });
 
+test("a local compare reports only yes or no", async () => {
+  const owner = "owner-password-value";
+  const session = "session-secret-value-at-least-32";
+  async function compare(candidate) {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [script], {
+        env: {
+          ...process.env,
+          OWNER_PASSWORD: owner,
+          SESSION_SECRET: session,
+          CPA_DIAG_CANDIDATE: candidate,
+          CPA_DIAG_MODE: "compare",
+        },
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("close", (status) => resolve({ status, stdout, stderr }));
+    });
+  }
+  const ownerHit = await compare(owner);
+  assert.equal(ownerHit.status, 0);
+  assert.match(ownerHit.stdout, /DIAG\|matchesOwner\|true/);
+  assert.match(ownerHit.stdout, /DIAG\|matchesSession\|false/);
+  assert.equal((ownerHit.stdout + ownerHit.stderr).includes(owner), false);
+  assert.equal((ownerHit.stdout + ownerHit.stderr).includes(session), false);
+
+  const sessionHit = await compare(session);
+  assert.match(sessionHit.stdout, /DIAG\|matchesOwner\|false/);
+  assert.match(sessionHit.stdout, /DIAG\|matchesSession\|true/);
+  assert.equal((sessionHit.stdout + sessionHit.stderr).includes(session), false);
+
+  const miss = await compare("different-password-value");
+  assert.match(miss.stdout, /DIAG\|matchesOwner\|false/);
+  assert.match(miss.stdout, /DIAG\|matchesSession\|false/);
+});
+
 test("a framed browser body keeps the password exact", () => {
   const password = `a+b&c% d"'\u00e9`;
   const body = Buffer.from(`password=${encodeURIComponent(password)}\r\n`);

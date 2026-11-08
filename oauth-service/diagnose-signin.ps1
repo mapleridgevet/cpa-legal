@@ -1,10 +1,12 @@
 # Reads the saved sign-in file and reports only lengths and character classes.
 # It does not print the password, the session secret, or any hash.
 # It does not change secrets, config, tokens, or the throttle file.
+# -Compare asks once, locally, for the website password and prints only yes or no.
 # It does not listen and does not start the service unless -Listen is passed.
 param(
   [string]$DataDir = "C:\Users\naesm\AppData\Local\MapleRidge\cpa-oauth",
-  [switch]$Listen
+  [switch]$Listen,
+  [switch]$Compare
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,6 +64,45 @@ function Convert-FromSecure {
   }
 }
 
+function Write-ListenerIdentity {
+  $found = @()
+  try {
+    $rows = @(netstat -ano -p tcp)
+  } catch {
+    Write-Diag "listenerCount" "unknown"
+    return
+  }
+  foreach ($line in $rows) {
+    if ($line -match "^\s*TCP\s+\S+:8787\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+      $found += $Matches[1]
+    }
+  }
+  $unique = @($found | Select-Object -Unique)
+  if ($found.Count -eq 0) {
+    Write-Diag "listenerCount" "0"
+    return
+  }
+  Write-Diag "listenerCount" ([string]$unique.Count)
+  foreach ($procId in $unique) {
+    try {
+      $proc = Get-Process -Id ([int]$procId) -ErrorAction Stop
+      Write-Diag "listenerName" ([string]$proc.ProcessName)
+      Write-Diag "listenerPid" ([string]$proc.Id)
+      if ($proc.StartTime) {
+        Write-Diag "listenerStarted" ($proc.StartTime.ToString("yyyy-MM-ddTHH:mm:ss"))
+      }
+      if ($proc.Path) { Write-Diag "listenerPath" ([string]$proc.Path) }
+    } catch {
+      Write-Diag "listenerName" "unavailable"
+    }
+  }
+}
+
+if ($Listen -and $Compare) {
+  Write-Diag "diagnostic" "choose-one"
+  exit 1
+}
+
 if (-not (Test-Path -LiteralPath $SecretPath)) {
   Write-Diag "secretFile" "missing"
   exit 1
@@ -89,8 +130,6 @@ Write-Diag "sessionType" "SecureString"
 
 $ownerPlain = Convert-FromSecure $ownerSecure
 $sessionPlain = Convert-FromSecure $sessionSecure
-$ownerParent = Get-SecretFlags $ownerPlain
-$sessionParent = Get-SecretFlags $sessionPlain
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $js = Join-Path $here "src\secret-diagnostic.js"
@@ -101,6 +140,49 @@ if (-not (Test-Path -LiteralPath $js)) {
   Write-Diag "diagnostic" "missing-script"
   exit 1
 }
+
+if ($Compare) {
+  Write-ListenerIdentity
+  Write-Host "Type the password you use on the website sign-in page. It will not appear. Then press Enter."
+  $candidateSecure = Read-Host -AsSecureString
+  $candidatePlain = ""
+  if ($null -eq $candidateSecure -or $candidateSecure.Length -eq 0) {
+    Write-Diag "matchesOwner" "false"
+    Write-Diag "matchesSession" "false"
+    Write-Diag "candidate" "empty"
+    Write-Diag "filesChanged" "false"
+    exit 0
+  }
+  $candidatePlain = Convert-FromSecure $candidateSecure
+  $compareNames = @("OWNER_PASSWORD", "SESSION_SECRET", "CPA_DIAG_CANDIDATE", "CPA_DIAG_MODE")
+  try {
+    Set-Item -Path Env:OWNER_PASSWORD -Value $ownerPlain
+    Set-Item -Path Env:SESSION_SECRET -Value $sessionPlain
+    Set-Item -Path Env:CPA_DIAG_CANDIDATE -Value $candidatePlain
+    Set-Item -Path Env:CPA_DIAG_MODE -Value "compare"
+    $child = & node $js
+    foreach ($line in @($child)) {
+      if ($line -match "^DIAG\|(matchesOwner|matchesSession|refused|compare|filesChanged)\|") {
+        Write-Host $line
+      }
+    }
+    if ($LASTEXITCODE -ne 0) { Write-Diag "compare" "failed" }
+  } catch {
+    Write-Diag "compare" "failed"
+    exit 1
+  } finally {
+    foreach ($name in $compareNames) {
+      Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+    }
+    $ownerPlain = $null
+    $sessionPlain = $null
+    $candidatePlain = $null
+  }
+  exit 0
+}
+
+$ownerParent = Get-SecretFlags $ownerPlain
+$sessionParent = Get-SecretFlags $sessionPlain
 
 $names = @("OWNER_PASSWORD", "SESSION_SECRET", "CPA_DIAG_MODE", "CPA_DIAG_PORT")
 try {
